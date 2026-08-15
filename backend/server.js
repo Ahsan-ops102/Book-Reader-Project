@@ -7,13 +7,21 @@ import aiRouter from "./routes/ai.js";
 const app = express();
 const PORT = process.env.PORT || 3001;
 const APP_PASSWORD = process.env.APP_PASSWORD || "";
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "http://localhost:5173")
+const rawOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:5173")
   .split(",")
-  .map((s) => s.trim());
+  .map((s) => s.trim().replace(/\/$/, ""));
 
 app.use(
   cors({
-    origin: ALLOWED_ORIGINS,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, curl, server-to-server)
+      if (!origin) return callback(null, true);
+      const cleanOrigin = origin.replace(/\/$/, "");
+      if (rawOrigins.includes("*") || rawOrigins.includes(cleanOrigin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS error: Origin ${origin} not allowed`));
+    },
   })
 );
 app.use(express.json());
