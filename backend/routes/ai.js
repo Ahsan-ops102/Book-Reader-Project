@@ -25,6 +25,10 @@ router.post("/query", async (req, res) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          maxOutputTokens: 512,
+          thinkingConfig: { thinkingBudget: 0 },
+        },
       }),
     });
 

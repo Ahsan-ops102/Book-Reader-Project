@@ -1,27 +1,28 @@
-import Database from "better-sqlite3";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { createClient } from "@libsql/client";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const db = new Database(path.join(__dirname, "library.db"));
+const client = createClient({
+  url: process.env.TURSO_DATABASE_URL,
+  authToken: process.env.TURSO_AUTH_TOKEN,
+});
 
-db.pragma("journal_mode = WAL");
+// Create tables on startup (batch sends all statements in one round-trip)
+await client.batch(
+  [
+    `CREATE TABLE IF NOT EXISTS books (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      page_count INTEGER,
+      uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS progress (
+      book_id TEXT PRIMARY KEY REFERENCES books(id) ON DELETE CASCADE,
+      current_page INTEGER NOT NULL DEFAULT 1,
+      zoom REAL NOT NULL DEFAULT 1.0,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+  ],
+  "write"
+);
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS books (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    filename TEXT NOT NULL,
-    page_count INTEGER,
-    uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS progress (
-    book_id TEXT PRIMARY KEY REFERENCES books(id) ON DELETE CASCADE,
-    current_page INTEGER NOT NULL DEFAULT 1,
-    zoom REAL NOT NULL DEFAULT 1.0,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-`);
-
-export default db;
+export default client;
