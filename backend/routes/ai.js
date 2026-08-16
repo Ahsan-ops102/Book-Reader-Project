@@ -27,7 +27,6 @@ router.post("/query", async (req, res) => {
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
           maxOutputTokens: 512,
-          thinkingConfig: { thinkingBudget: 0 },
         },
       }),
     });
