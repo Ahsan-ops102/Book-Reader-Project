@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
 import { queryAI } from "../api.js";
 import "./AIPanel.css";
 
@@ -35,15 +35,19 @@ const QUICK_ACTIONS = [
   },
 ];
 
-export default function AIPanel({ open, selectedText, onClose }) {
+const AIPanel = forwardRef(function AIPanel(
+  { open, selectedText, initialQuery, onClose, onQueryConsumed },
+  ref
+) {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]); // [{ role: 'user'|'ai', text, time }]
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [copiedIdx, setCopiedIdx] = useState(null);
   const messagesEndRef = useRef(null);
+  const initialQueryFired = useRef(false);
 
-  // When selection changes, reset or update contextual prompt
+  // When selection changes, clear errors
   useEffect(() => {
     if (selectedText) {
       setError("");
@@ -54,6 +58,19 @@ export default function AIPanel({ open, selectedText, onClose }) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  // Auto-fire initialQuery (e.g. when user clicks "Define")
+  useEffect(() => {
+    if (initialQuery && open && !initialQueryFired.current) {
+      initialQueryFired.current = true;
+      handleSend(initialQuery);
+      onQueryConsumed?.();
+    }
+    if (!initialQuery) {
+      initialQueryFired.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialQuery, open]);
 
   async function handleSend(promptText) {
     const textToAsk = (promptText || question).trim();
@@ -97,7 +114,12 @@ export default function AIPanel({ open, selectedText, onClose }) {
   }
 
   return (
-    <aside className={`ai-panel ${open ? "open" : ""}`} aria-label="AI Reading Companion">
+    <aside
+      ref={ref}
+      className={`ai-panel ${open ? "open" : ""}`}
+      aria-label="AI Reading Companion"
+      onClick={(e) => e.stopPropagation()} // prevent click-outside when clicking inside
+    >
       {/* Header */}
       <div className="ai-panel-header">
         <div className="ai-header-left">
@@ -233,4 +255,6 @@ export default function AIPanel({ open, selectedText, onClose }) {
       </form>
     </aside>
   );
-}
+});
+
+export default AIPanel;

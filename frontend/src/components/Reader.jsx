@@ -48,6 +48,7 @@ export default function Reader() {
   // Selection & Quick AI Floating action
   const [selection, setSelection] = useState("");
   const [askButton, setAskButton] = useState(null);
+  const [initialQuery, setInitialQuery] = useState(""); // auto-fire query when Define is clicked
 
   // Audio / Text-to-Speech (TTS)
   const [speaking, setSpeaking] = useState(false);
@@ -56,6 +57,7 @@ export default function Reader() {
 
   const scrollRef = useRef(null);
   const readerRootRef = useRef(null);
+  const aiPanelRef = useRef(null);
   const restoredRef = useRef(false);
   const saveTimer = useRef(null);
   const fileSource = useRef(bookFileSource(id)).current;
@@ -593,25 +595,48 @@ export default function Reader() {
         </main>
       </div>
 
-      {/* Floating "Ask AI about this" selection button */}
+      {/* Floating selection action buttons: "Define" + "Ask AI" */}
       {askButton && (
-        <button
-          className="ask-ai-floating"
-          style={{ left: askButton.x, top: askButton.y - 48 }}
-          onClick={() => {
-            setPanelOpen(true);
-            setAskButton(null);
-          }}
-        >
-          ✨ Ask AI about this
-        </button>
+        <div className="floating-actions" style={{ left: askButton.x, top: askButton.y - 48 }}>
+          <button
+            className="define-floating"
+            onClick={() => {
+              setInitialQuery(`Define this word/phrase clearly and concisely, then give a simple example sentence: "${selection}"`);
+              setPanelOpen(true);
+              setAskButton(null);
+            }}
+          >
+            📚 Define
+          </button>
+          <button
+            className="ask-ai-floating"
+            onClick={() => {
+              setInitialQuery("");
+              setPanelOpen(true);
+              setAskButton(null);
+            }}
+          >
+            ✨ Ask AI
+          </button>
+        </div>
+      )}
+
+      {/* Click-outside overlay to close AI panel */}
+      {panelOpen && (
+        <div
+          className="ai-panel-backdrop"
+          onClick={() => setPanelOpen(false)}
+        />
       )}
 
       {/* Interactive AI Assistant Panel */}
       <AIPanel
+        ref={aiPanelRef}
         open={panelOpen}
         selectedText={selection}
+        initialQuery={initialQuery}
         onClose={() => setPanelOpen(false)}
+        onQueryConsumed={() => setInitialQuery("")}
       />
     </div>
   );

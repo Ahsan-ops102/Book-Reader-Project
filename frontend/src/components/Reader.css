@@ -484,27 +484,61 @@
   font-size: 13px;
 }
 
-/* ── Floating Ask AI Button ─────────────────────────────── */
-.ask-ai-floating {
+/* ── Floating Selection Action Buttons (Define + Ask AI) ── */
+.floating-actions {
   position: fixed;
   transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  z-index: 30;
+  animation: scaleIn 0.15s ease-out;
+}
+
+.define-floating {
+  background: var(--accent-gradient);
+  color: #FFFFFF;
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(232, 115, 74, 0.4);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  white-space: nowrap;
+}
+
+.define-floating:hover {
+  transform: scale(1.06);
+  box-shadow: 0 8px 24px rgba(232, 115, 74, 0.5);
+}
+
+.ask-ai-floating {
   background: var(--ai-accent-gradient);
   color: #FFFFFF;
   border: none;
   border-radius: var(--radius-pill);
-  padding: 9px 18px;
+  padding: 8px 16px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 6px 20px rgba(44, 183, 158, 0.4);
-  z-index: 30;
-  animation: scaleIn 0.15s ease-out;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
+  white-space: nowrap;
 }
 
 .ask-ai-floating:hover {
-  transform: translateX(-50%) scale(1.06);
+  transform: scale(1.06);
   box-shadow: 0 8px 24px rgba(44, 183, 158, 0.5);
+}
+
+/* ── AI Panel Click-Outside Backdrop ────────────────────── */
+.ai-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: transparent;
+  /* Invisible overlay that catches clicks outside the AI panel */
 }
 
 .reader-loading-wrap {
@@ -520,3 +554,4 @@
   padding: 8px 16px;
   font-size: 13px;
 }
+
