@@ -47,7 +47,7 @@ export default function BookCard({ book, onDelete, onSummarize, viewMode = "grid
   const hash = hashString(book.title);
   const [c1, c2] = BINDINGS[hash % BINDINGS.length];
   
-  // Algorithmic background generator
+  // Algorithmic background generator (fallback)
   let bgStyle = "";
   const type = hash % 5;
   if (type === 0) bgStyle = `linear-gradient(155deg, ${c1} 0%, ${c2} 100%)`;
@@ -55,6 +55,11 @@ export default function BookCard({ book, onDelete, onSummarize, viewMode = "grid
   else if (type === 2) bgStyle = `linear-gradient(45deg, ${c1} 30%, ${c2} 90%)`;
   else if (type === 3) bgStyle = `linear-gradient(to right bottom, ${c1}, #00000030, ${c2})`;
   else bgStyle = `radial-gradient(ellipse at bottom right, ${c1}, ${c2})`;
+
+  // AI Generated Book Cover
+  const prompt = `A beautifully designed, aesthetic, minimalistic book cover for a book titled '${book.title}'. No text. 4k, digital art, masterpiece`;
+  const coverUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=400&height=600&nologo=true&seed=${hash}`;
+
   const hasPages = Boolean(book.page_count);
   const progressPct = hasPages
     ? Math.min(100, Math.round((book.current_page / book.page_count) * 100))
@@ -135,6 +140,7 @@ export default function BookCard({ book, onDelete, onSummarize, viewMode = "grid
         onClick={() => navigate(`/book/${book.id}`)}
         aria-label={`Open ${book.title}`}
       >
+        <img src={coverUrl} className="book-cover-image" alt={`Cover for ${book.title}`} loading="lazy" />
         <div className="book-spine-line" />
         <span className="book-cover-title">{book.title}</span>
 

@@ -26,6 +26,18 @@ export default function Reader() {
   const [pageRatio, setPageRatio] = useState(1.3);
   const [currentPage, setCurrentPage] = useState(1);
   const [zoom, setZoom] = useState(1.0);
+
+  const currentPageRef = useRef(currentPage);
+  const zoomRef = useRef(zoom);
+  useEffect(() => { currentPageRef.current = currentPage; }, [currentPage]);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+
+  // Flush exact progress on unmount
+  useEffect(() => {
+    return () => {
+      updateProgress(id, currentPageRef.current, zoomRef.current).catch(() => {});
+    };
+  }, [id]);
   const [loadError, setLoadError] = useState("");
   const [pdfDoc, setPdfDoc] = useState(null);
 
