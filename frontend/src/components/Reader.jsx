@@ -65,6 +65,11 @@ export default function Reader() {
   const [askButton, setAskButton] = useState(null);
   const [initialQuery, setInitialQuery] = useState(""); // auto-fire query when Define is clicked
 
+  // Pomodoro Timer & Session Tracking
+  const [pomoTime, setPomoTime] = useState(25 * 60);
+  const [isPomoActive, setIsPomoActive] = useState(false);
+  const [isPomoBreak, setIsPomoBreak] = useState(false);
+
   // PDF Text Search
   const [searchText, setSearchText] = useState("");
   const [searchMatches, setSearchMatches] = useState([]);
@@ -207,6 +212,81 @@ export default function Reader() {
     const prevIdx = (searchMatchIdx - 1 + searchMatches.length) % searchMatches.length;
     setSearchMatchIdx(prevIdx);
     jumpToPage(searchMatches[prevIdx]);
+  }
+
+  function exportNotes() {
+    let md = `# Reading Notes: ${title}\n\n`;
+    
+    if (bookmarks.length > 0) {
+      md += `## Bookmarks\n`;
+      bookmarks.forEach(p => md += `- Page ${p}\n`);
+      md += `\n`;
+    }
+
+    if (highlights.length > 0) {
+      md += `## Highlights\n`;
+      highlights.forEach(hl => {
+        md += `- **Page ${hl.pageNumber}**: "${hl.text}"\n`;
+      });
+      md += `\n`;
+    }
+
+    const flashcards = JSON.parse(localStorage.getItem(`reader_fc_${id}`)) || [];
+    if (flashcards.length > 0) {
+      md += `## Flashcards (Q&A)\n`;
+      flashcards.forEach(fc => {
+        md += `- **Q:** ${fc.front}\n  **A:** ${fc.back}\n`;
+      });
+      md += `\n`;
+    }
+
+    if (!bookmarks.length && !highlights.length && !flashcards.length) {
+      alert("No notes or highlights to export yet!");
+      return;
+    }
+
+    const blob = new Blob([md], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${title.replace(/\s+/g, '_')}_Notes.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Active Reading Session Tracking
+  useEffect(() => {
+    const trackInterval = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        const total = parseInt(localStorage.getItem("reader_total_minutes") || "0", 10);
+        localStorage.setItem("reader_total_minutes", (total + 1).toString());
+      }
+    }, 60000);
+    return () => clearInterval(trackInterval);
+  }, []);
+
+  // Pomodoro Timer Logic
+  useEffect(() => {
+    if (!isPomoActive) return;
+    const interval = setInterval(() => {
+      setPomoTime((t) => {
+        if (t <= 1) {
+          setIsPomoActive(false);
+          const nextIsBreak = !isPomoBreak;
+          setIsPomoBreak(nextIsBreak);
+          alert(nextIsBreak ? "Time for a 5-minute break! ☕" : "Break is over! Time to focus. 📚");
+          return nextIsBreak ? 5 * 60 : 25 * 60;
+        }
+        return t - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isPomoActive, isPomoBreak]);
+
+  function formatTime(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   }
 
   // Load book metadata
@@ -631,6 +711,15 @@ export default function Reader() {
             {speaking ? "🔊 Pause" : "🎧 Listen"}
           </button>
 
+          {/* Pomodoro Timer */}
+          <button
+            className={`toolbar-btn pomo-btn ${isPomoActive ? (isPomoBreak ? "break" : "active") : ""}`}
+            onClick={() => setIsPomoActive(!isPomoActive)}
+            title="Pomodoro Focus Timer (25m Focus / 5m Break)"
+          >
+            🍅 {formatTime(pomoTime)}
+          </button>
+
           {/* Fullscreen button */}
           <button
             className="toolbar-btn icon-btn"
@@ -697,9 +786,16 @@ export default function Reader() {
                 {sidebarTab === "bookmarks" && "🔖 Saved Bookmarks"}
                 {sidebarTab === "highlights" && "🖍️ My Highlights"}
               </h3>
-              <button onClick={() => setSidebarTab(null)} className="sidebar-close-btn">
-                ✕
-              </button>
+              <div className="sidebar-header-actions">
+                {(sidebarTab === "highlights" || sidebarTab === "bookmarks") && (
+                  <button onClick={exportNotes} className="export-notes-btn" title="Export as Markdown">
+                    📤 Export
+                  </button>
+                )}
+                <button onClick={() => setSidebarTab(null)} className="sidebar-close-btn">
+                  ✕
+                </button>
+              </div>
             </div>
 
             <div className="sidebar-content">

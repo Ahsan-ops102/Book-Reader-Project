@@ -629,6 +629,30 @@
   font-weight: 600;
 }
 
+.book-tags {
+  margin-top: 6px;
+}
+
+.book-tag {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.book-tag:hover {
+  border-style: solid;
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+.book-tag.work { background: rgba(74, 122, 181, 0.15); color: #4A7AB5; border-style: solid; border-color: transparent; }
+.book-tag.fiction { background: rgba(232, 115, 74, 0.15); color: #E8734A; border-style: solid; border-color: transparent; }
+.book-tag.university { background: rgba(139, 92, 246, 0.15); color: #8B5CF6; border-style: solid; border-color: transparent; }
+.book-tag.self-help { background: rgba(44, 183, 158, 0.15); color: #2CB79E; border-style: solid; border-color: transparent; }
+
 .book-card-actions {
   position: absolute;
   top: 10px;

@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
 
 // A warm, rich palette of book binding colors — vibrant and inviting
 const BINDINGS = [
@@ -25,6 +26,24 @@ function hashString(str = "") {
 
 export default function BookCard({ book, onDelete, onSummarize, viewMode = "grid" }) {
   const navigate = useNavigate();
+
+  const [tag, setTag] = useState(() => {
+    try {
+      const tags = JSON.parse(localStorage.getItem("reader_tags")) || {};
+      return tags[book.id] || "";
+    } catch { return ""; }
+  });
+
+  // Listen for tag updates across instances
+  useEffect(() => {
+    const handleUpdate = () => {
+      const tags = JSON.parse(localStorage.getItem("reader_tags")) || {};
+      setTag(tags[book.id] || "");
+    };
+    window.addEventListener("reader_tags_updated", handleUpdate);
+    return () => window.removeEventListener("reader_tags_updated", handleUpdate);
+  }, [book.id]);
+
   const hash = hashString(book.title);
   const [c1, c2] = BINDINGS[hash % BINDINGS.length];
   
@@ -145,6 +164,26 @@ export default function BookCard({ book, onDelete, onSummarize, viewMode = "grid
             "Not started"
           )}
         </p>
+        <div className="book-tags">
+          <button 
+            className={`book-tag ${tag ? tag.toLowerCase() : "none"}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              const COLLECTIONS = ["", "Work", "Fiction", "University", "Self-Help"];
+              const currentIdx = COLLECTIONS.indexOf(tag);
+              const nextTag = COLLECTIONS[(currentIdx + 1) % COLLECTIONS.length];
+              setTag(nextTag);
+              const tags = JSON.parse(localStorage.getItem("reader_tags")) || {};
+              if (nextTag) tags[book.id] = nextTag;
+              else delete tags[book.id];
+              localStorage.setItem("reader_tags", JSON.stringify(tags));
+              window.dispatchEvent(new Event("reader_tags_updated")); // Notify Library to re-filter
+            }}
+            title="Click to cycle collection tag"
+          >
+            {tag ? `🏷️ ${tag}` : "+ Add Tag"}
+          </button>
+        </div>
       </div>
 
       <div className="book-card-actions">

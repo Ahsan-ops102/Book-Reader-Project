@@ -27,6 +27,21 @@ function getStreakData() {
   }
 }
 
+const QUOTES = [
+  "A reader lives a thousand lives before he dies. — George R.R. Martin",
+  "The more that you read, the more things you will know. — Dr. Seuss",
+  "There is no friend as loyal as a book. — Ernest Hemingway",
+  "Books are a uniquely portable magic. — Stephen King",
+  "Reading brings us unknown friends. — Honoré de Balzac",
+  "Once you learn to read, you will be forever free. — Frederick Douglass",
+  "I have always imagined that Paradise will be a kind of library. — Jorge Luis Borges"
+];
+
+function getDailyQuote() {
+  const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
+  return QUOTES[dayOfYear % QUOTES.length];
+}
+
 export default function Library() {
   const navigate = useNavigate();
   const [books, setBooks] = useState(null); // null = loading
@@ -36,9 +51,13 @@ export default function Library() {
   const [activeTab, setActiveTab] = useState("books"); // "books" | "stats" | "flashcards"
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all"); // "all" | "reading" | "completed" | "unread"
+  const [collectionFilter, setCollectionFilter] = useState("all");
   const [sortBy, setSortBy] = useState("recent"); // "recent" | "title-asc" | "progress-desc" | "newest"
   const [viewMode, setViewMode] = useState("grid"); // "grid" | "list"
   const [isDragging, setIsDragging] = useState(false);
+  const [tagsState, setTagsState] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("reader_tags")) || {}; } catch { return {}; }
+  });
 
   const fileInputRef = useRef(null);
   const dragCounterRef = useRef(0);
@@ -50,7 +69,14 @@ export default function Library() {
       .catch(() => setError("Couldn't reach the backend. Is it running?"));
   }
 
-  useEffect(refresh, []);
+  useEffect(() => {
+    refresh();
+    const handleTagsUpdate = () => {
+      try { setTagsState(JSON.parse(localStorage.getItem("reader_tags")) || {}); } catch {}
+    };
+    window.addEventListener("reader_tags_updated", handleTagsUpdate);
+    return () => window.removeEventListener("reader_tags_updated", handleTagsUpdate);
+  }, []);
 
   async function processPdfFile(file) {
     if (!file) return;
@@ -138,6 +164,10 @@ export default function Library() {
       list = list.filter((b) => !b.page_count || b.current_page <= 1);
     }
 
+    if (collectionFilter !== "all") {
+      list = list.filter((b) => tagsState[b.id] === collectionFilter);
+    }
+
     if (sortBy === "title-asc") {
       list.sort((a, b) => a.title.localeCompare(b.title));
     } else if (sortBy === "progress-desc") {
@@ -197,6 +227,10 @@ export default function Library() {
               ? `${books.length} book${books.length === 1 ? "" : "s"} in your cloud library · ${counts.completed} completed`
               : "Your personal serene reading sanctuary"}
           </p>
+          <div className="daily-quote">
+            <span className="quote-icon">💡</span>
+            <em>{getDailyQuote()}</em>
+          </div>
         </div>
 
         <div className="header-actions">
@@ -285,6 +319,13 @@ export default function Library() {
                 </div>
 
                 <div className="toolbar-right-controls">
+                  <select value={collectionFilter} onChange={(e) => setCollectionFilter(e.target.value)} className="sort-select">
+                    <option value="all">All Collections</option>
+                    <option value="Work">Work</option>
+                    <option value="Fiction">Fiction</option>
+                    <option value="University">University</option>
+                    <option value="Self-Help">Self-Help</option>
+                  </select>
                   <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="sort-select">
                     <option value="recent">Recently Read</option>
                     <option value="title-asc">Title (A to Z)</option>

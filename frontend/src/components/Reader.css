@@ -77,9 +77,21 @@
 }
 
 .toolbar-btn.active {
-  background: var(--text);
-  color: #FFFFFF;
-  border-color: var(--text);
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.pomo-btn.active {
+  background: #E8734A; /* Pomodoro red-orange */
+  color: white;
+  border-color: #E8734A;
+}
+
+.pomo-btn.break {
+  background: #2CB79E; /* Break green */
+  color: white;
+  border-color: #2CB79E;
 }
 
 /* Page Navigation Group */
@@ -309,6 +321,28 @@
   font-size: 15px;
   margin: 0;
   color: var(--text);
+}
+
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.export-notes-btn {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.export-notes-btn:hover {
+  background: var(--accent-soft);
 }
 
 .sidebar-close-btn {

@@ -17,8 +17,18 @@ export default function StatsPanel({ books }) {
   const pagesRead = booksWithPages.reduce((sum, b) => sum + (b.current_page || 0), 0);
   const completed = booksWithPages.filter((b) => b.current_page >= b.page_count).length;
   const inProgress = booksWithPages.filter((b) => b.current_page > 1 && b.current_page < b.page_count).length;
-  const notStarted = totalBooks - completed - inProgress;
   const overallPct = totalPages > 0 ? Math.round((pagesRead / totalPages) * 100) : 0;
+
+  const totalMinutes = parseInt(localStorage.getItem("reader_total_minutes") || "0", 10);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const timeString = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+
+  const handleShare = () => {
+    const text = `📚 My Reading Shelf:\n✅ ${completed} Books Completed\n📖 ${pagesRead.toLocaleString()} Pages Read\n⏱️ ${timeString} Focus Time\n\nTracked via Reading Room 🚀`;
+    navigator.clipboard.writeText(text);
+    alert("Shareable stats copied to clipboard!");
+  };
 
   const stats = [
     {
@@ -29,12 +39,20 @@ export default function StatsPanel({ books }) {
       bgColor: "rgba(74, 122, 181, 0.1)",
     },
     {
+      label: "Reading Time",
+      value: timeString,
+      subtitle: "Total focus time",
+      icon: "⏱️",
+      color: "#E8734A",
+      bgColor: "rgba(232, 115, 74, 0.1)",
+    },
+    {
       label: "Pages Read",
       value: pagesRead.toLocaleString(),
       subtitle: `of ${totalPages.toLocaleString()} total`,
       icon: "📖",
-      color: "#E8734A",
-      bgColor: "rgba(232, 115, 74, 0.1)",
+      color: "#8B5CF6",
+      bgColor: "rgba(139, 92, 246, 0.1)",
     },
     {
       label: "Completed",
@@ -98,6 +116,9 @@ export default function StatsPanel({ books }) {
               ? `You've read ${pagesRead.toLocaleString()} pages so far. Great progress! 📖`
               : "Start reading to track your progress here."}
           </p>
+          <button className="share-shelf-btn" onClick={handleShare}>
+            📤 Share My Shelf
+          </button>
         </div>
       </div>
 
@@ -151,12 +172,54 @@ export default function StatsPanel({ books }) {
         </div>
       )}
 
-      {/* Not started callout */}
-      {notStarted > 0 && (
-        <div className="stats-callout">
-          📚 You have {notStarted} {notStarted === 1 ? "book" : "books"} waiting to be read!
+      {/* Achievements & Badges */}
+      <div className="stats-badges">
+        <h3>Achievements</h3>
+        <div className="badges-grid">
+          <div className={`badge-card ${totalBooks >= 1 ? "unlocked" : "locked"}`}>
+            <div className="badge-icon">📖</div>
+            <div className="badge-info">
+              <h4>First Book</h4>
+              <p>Add your first book to the library.</p>
+            </div>
+          </div>
+          <div className={`badge-card ${completed >= 1 ? "unlocked" : "locked"}`}>
+            <div className="badge-icon">🎉</div>
+            <div className="badge-info">
+              <h4>Finisher</h4>
+              <p>Complete your first book entirely.</p>
+            </div>
+          </div>
+          <div className={`badge-card ${pagesRead >= 100 ? "unlocked" : "locked"}`}>
+            <div className="badge-icon">🔥</div>
+            <div className="badge-info">
+              <h4>Avid Reader</h4>
+              <p>Read 100 pages across your library.</p>
+            </div>
+          </div>
+          <div className={`badge-card ${totalMinutes >= 60 ? "unlocked" : "locked"}`}>
+            <div className="badge-icon">⏱️</div>
+            <div className="badge-info">
+              <h4>Deep Work</h4>
+              <p>Read for at least 1 hour in total.</p>
+            </div>
+          </div>
+          <div className={`badge-card ${totalBooks >= 10 ? "unlocked" : "locked"}`}>
+            <div className="badge-icon">📚</div>
+            <div className="badge-info">
+              <h4>Librarian</h4>
+              <p>Upload 10 books to your collection.</p>
+            </div>
+          </div>
+          <div className={`badge-card locked`}>
+            <div className="badge-icon">🧠</div>
+            <div className="badge-info">
+              <h4>Curious Mind</h4>
+              <p>Ask 100 AI Questions (Coming Soon).</p>
+            </div>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
