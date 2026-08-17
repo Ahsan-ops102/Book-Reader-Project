@@ -315,13 +315,14 @@ export default function Reader() {
   // PDF Document loaded callback
   function onDocumentLoad(pdf) {
     setPdfDoc(pdf);
-    setNumPages(pdf.numPages);
-    updatePageCount(id, pdf.numPages).catch(() => {});
-
-    // Compute aspect ratio
+    
+    // Compute aspect ratio first, then set numPages so scroll restoration uses the right height
     pdf.getPage(1).then((page) => {
       const viewport = page.getViewport({ scale: 1 });
       setPageRatio(viewport.height / viewport.width);
+      
+      setNumPages(pdf.numPages);
+      updatePageCount(id, pdf.numPages).catch(() => {});
     });
 
     // Extract PDF Table of Contents Outline
