@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -19,6 +19,7 @@ const WINDOW_RADIUS = 3; // windowed virtual rendering for smooth 60fps
 export default function Reader() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [title, setTitle] = useState("");
   const [numPages, setNumPages] = useState(null);
@@ -29,7 +30,21 @@ export default function Reader() {
   const [pdfDoc, setPdfDoc] = useState(null);
 
   // Reader Settings & Themes (Persisted in localStorage)
-  const [theme, setTheme] = useState(() => localStorage.getItem("reader_theme") || "warm");
+  const [themePref, setThemePref] = useState(() => localStorage.getItem("reader_theme") || "warm");
+  
+  // Computed theme: if "auto", check time, else use the raw preference
+  const [theme, setTheme] = useState(themePref);
+  useEffect(() => {
+    if (themePref === "auto") {
+      const hour = new Date().getHours();
+      setTheme((hour >= 19 || hour < 7) ? "dark" : "warm");
+    } else {
+      setTheme(themePref);
+    }
+  }, [themePref]);
+
+  const [ambientTrack, setAmbientTrack] = useState(() => localStorage.getItem("reader_ambient") || "none");
+
   const [viewMode, setViewMode] = useState(() => localStorage.getItem("reader_view_mode") || "scroll"); // "scroll" | "single"
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -50,6 +65,21 @@ export default function Reader() {
   const [askButton, setAskButton] = useState(null);
   const [initialQuery, setInitialQuery] = useState(""); // auto-fire query when Define is clicked
 
+  // PDF Text Search
+  const [searchText, setSearchText] = useState("");
+  const [searchMatches, setSearchMatches] = useState([]);
+  const [searchMatchIdx, setSearchMatchIdx] = useState(0);
+  const [isSearching, setIsSearching] = useState(false);
+
+  // Highlights / Annotations
+  const [highlights, setHighlights] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(`reader_hl_${id}`)) || [];
+    } catch {
+      return [];
+    }
+  });
+
   // Audio / Text-to-Speech (TTS)
   const [speaking, setSpeaking] = useState(false);
   const [speechRate, setSpeechRate] = useState(1.0);
@@ -60,6 +90,7 @@ export default function Reader() {
   const aiPanelRef = useRef(null);
   const restoredRef = useRef(false);
   const saveTimer = useRef(null);
+  const searchTimer = useRef(null);
   const fileSource = useRef(bookFileSource(id)).current;
 
   const pageWidth = RENDER_WIDTH * zoom;
@@ -67,12 +98,18 @@ export default function Reader() {
 
   // Apply theme to document / container
   useEffect(() => {
-    localStorage.setItem("reader_theme", theme);
+    localStorage.setItem("reader_theme", themePref);
     document.documentElement.setAttribute("data-reader-theme", theme);
     return () => {
       document.documentElement.removeAttribute("data-reader-theme");
     };
-  }, [theme]);
+  }, [theme, themePref]);
+
+  // Persist ambient track
+  useEffect(() => {
+    localStorage.setItem("reader_ambient", ambientTrack);
+  }, [ambientTrack]);
+
 
   // Persist view mode
   useEffect(() => {
@@ -83,6 +120,94 @@ export default function Reader() {
   useEffect(() => {
     localStorage.setItem(`reader_bm_${id}`, JSON.stringify(bookmarks));
   }, [bookmarks, id]);
+
+  // Persist highlights per book
+  useEffect(() => {
+    localStorage.setItem(`reader_hl_${id}`, JSON.stringify(highlights));
+  }, [highlights, id]);
+
+  // Execute PDF Document Search
+  useEffect(() => {
+    if (!searchText.trim() || !pdfDoc) {
+      setSearchMatches([]);
+      return;
+    }
+    let active = true;
+    setIsSearching(true);
+    clearTimeout(searchTimer.current);
+
+    searchTimer.current = setTimeout(async () => {
+      const matches = [];
+      const query = searchText.toLowerCase();
+      try {
+        for (let i = 1; i <= pdfDoc.numPages; i++) {
+          if (!active) break;
+          const page = await pdfDoc.getPage(i);
+          const content = await page.getTextContent();
+          const str = content.items.map((it) => it.str).join(" ");
+          if (str.toLowerCase().includes(query)) {
+            matches.push(i);
+          }
+        }
+        if (active) {
+          setSearchMatches(matches);
+          setSearchMatchIdx(0);
+          if (matches.length > 0) {
+            jumpToPage(matches[0]);
+          }
+        }
+      } catch (err) {}
+      if (active) setIsSearching(false);
+    }, 600);
+
+    return () => {
+      active = false;
+      clearTimeout(searchTimer.current);
+    };
+  }, [searchText, pdfDoc]);
+
+  // Handle auto-summarize action from Library
+  useEffect(() => {
+    if (!pdfDoc) return;
+    const params = new URLSearchParams(location.search);
+    if (params.get("action") === "summarize") {
+      // Remove query param to prevent re-firing on refresh
+      navigate(`/book/${id}`, { replace: true });
+      
+      const extractAndSummarize = async () => {
+        try {
+          // Extract first ~10 pages to give the AI context about the book
+          const maxPages = Math.min(10, pdfDoc.numPages);
+          let fullText = "";
+          for (let i = 1; i <= maxPages; i++) {
+            const page = await pdfDoc.getPage(i);
+            const content = await page.getTextContent();
+            fullText += content.items.map(it => it.str).join(" ") + " ";
+          }
+          const safeText = fullText.slice(0, 4000); // Prevent massive payloads
+          setInitialQuery(`Please write a comprehensive 1-page summary of this book based on the following intro text:\n\n${safeText}`);
+          setPanelOpen(true);
+        } catch (err) {
+          console.error("Failed to extract text for summary", err);
+        }
+      };
+      extractAndSummarize();
+    }
+  }, [pdfDoc, location.search, navigate, id]);
+
+  function nextMatch() {
+    if (searchMatches.length === 0) return;
+    const nextIdx = (searchMatchIdx + 1) % searchMatches.length;
+    setSearchMatchIdx(nextIdx);
+    jumpToPage(searchMatches[nextIdx]);
+  }
+  
+  function prevMatch() {
+    if (searchMatches.length === 0) return;
+    const prevIdx = (searchMatchIdx - 1 + searchMatches.length) % searchMatches.length;
+    setSearchMatchIdx(prevIdx);
+    jumpToPage(searchMatches[prevIdx]);
+  }
 
   // Load book metadata
   useEffect(() => {
@@ -192,7 +317,7 @@ export default function Reader() {
     }
   }
 
-  // Selection & quick AI
+  // Selection & quick AI / Highlighting
   function handleMouseUp() {
     const sel = window.getSelection();
     const text = sel?.toString().trim();
@@ -209,6 +334,55 @@ export default function Reader() {
       setAskButton(null);
     }
   }
+
+  function addHighlight(color) {
+    if (!selection) return;
+    const newHl = {
+      text: selection,
+      color,
+      page: currentPage,
+      id: Date.now().toString(),
+    };
+    setHighlights((prev) => [...prev, newHl]);
+    setAskButton(null);
+    window.getSelection()?.removeAllRanges();
+  }
+
+  // Custom Text Renderer for react-pdf to inject <mark> for highlights and search
+  const textRenderer = useCallback(
+    (textItem) => {
+      let content = textItem.str;
+      if (!content) return content;
+
+      // 1. Search Query Highlighting
+      if (searchText.trim()) {
+        const regex = new RegExp(`(${searchText.trim()})`, "gi");
+        const parts = content.split(regex);
+        if (parts.length > 1) {
+          return parts.map((part, i) =>
+            regex.test(part) ? <mark key={i} className="search-highlight">{part}</mark> : part
+          );
+        }
+      }
+
+      // 2. Annotation Highlighting
+      // (Basic string matching: if this textItem string contains a highlighted text)
+      for (const hl of highlights) {
+        if (hl.page === currentPage && content.includes(hl.text)) {
+          const parts = content.split(hl.text);
+          return parts.map((part, i) => (
+            <span key={i}>
+              {part}
+              {i < parts.length - 1 && <mark className={`hl-${hl.color}`}>{hl.text}</mark>}
+            </span>
+          ));
+        }
+      }
+
+      return content;
+    },
+    [searchText, highlights, currentPage]
+  );
 
   // Text-To-Speech (Native Web Speech API)
   function speakText(text) {
@@ -312,11 +486,45 @@ export default function Reader() {
           >
             🔖
           </button>
+          <button
+            className={`toolbar-btn icon-btn ${sidebarTab === "highlights" ? "active" : ""}`}
+            onClick={() => setSidebarTab((curr) => (curr === "highlights" ? null : "highlights"))}
+            title="My Highlights"
+          >
+            🖍️
+          </button>
           <span className="toolbar-title" title={title}>{title}</span>
         </div>
 
-        {/* Center Page Navigator */}
+        {/* Center Page Navigator & Search */}
         <div className="toolbar-center">
+          <div className="pdf-search-box">
+            <span className="search-icon">🔍</span>
+            <input
+              type="text"
+              placeholder="Search PDF…"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              className="pdf-search-input"
+            />
+            {searchText && (
+              <div className="pdf-search-controls">
+                {isSearching ? (
+                  <span className="search-spinner" />
+                ) : (
+                  <span className="search-matches">
+                    {searchMatches.length > 0 ? `${searchMatchIdx + 1}/${searchMatches.length}` : "0"}
+                  </span>
+                )}
+                <button onClick={prevMatch} disabled={searchMatches.length === 0} title="Previous match">↑</button>
+                <button onClick={nextMatch} disabled={searchMatches.length === 0} title="Next match">↓</button>
+                <button onClick={() => setSearchText("")} title="Clear">✕</button>
+              </div>
+            )}
+          </div>
+          
+          <div className="toolbar-separator" />
+
           <div className="toolbar-group nav-group">
             <button
               onClick={() => jumpToPage(currentPage - 1)}
@@ -385,17 +593,34 @@ export default function Reader() {
           {/* Theme Switcher Dropdown */}
           <div className="theme-switcher">
             <select
-              value={theme}
-              onChange={(e) => setTheme(e.target.value)}
+              value={themePref}
+              onChange={(e) => setThemePref(e.target.value)}
               className="theme-select"
               title="Reading Theme"
             >
+              <option value="auto">⏱️ Auto (Day/Night)</option>
               <option value="warm">☀️ Warm</option>
               <option value="sepia">📜 Sepia</option>
               <option value="dark">🌙 Dark</option>
               <option value="oled">🖤 OLED</option>
             </select>
           </div>
+
+          {/* Ambient Sounds Dropdown */}
+          <div className="ambient-switcher">
+            <select
+              value={ambientTrack}
+              onChange={(e) => setAmbientTrack(e.target.value)}
+              className="theme-select"
+              title="Ambient Background Sound"
+            >
+              <option value="none">🔇 No Sound</option>
+              <option value="https://actions.google.com/sounds/v1/weather/rain_heavy_loud.ogg">🌧️ Rain</option>
+              <option value="https://actions.google.com/sounds/v1/ambiences/fire.ogg">🔥 Fireplace</option>
+              <option value="https://actions.google.com/sounds/v1/ambiences/coffee_shop.ogg">☕ Cafe</option>
+            </select>
+          </div>
+
 
           {/* Text-to-Speech button */}
           <button
@@ -463,18 +688,22 @@ export default function Reader() {
 
       {/* Main Content Area */}
       <div className="reader-body">
-        {/* Left Side Drawer: Outline or Bookmarks */}
+        {/* Left Side Drawer: Outline, Bookmarks, Highlights */}
         {sidebarTab && (
           <aside className="reader-sidebar">
             <div className="sidebar-header">
-              <h3>{sidebarTab === "outline" ? "📑 Table of Contents" : "🔖 Saved Bookmarks"}</h3>
+              <h3>
+                {sidebarTab === "outline" && "📑 Table of Contents"}
+                {sidebarTab === "bookmarks" && "🔖 Saved Bookmarks"}
+                {sidebarTab === "highlights" && "🖍️ My Highlights"}
+              </h3>
               <button onClick={() => setSidebarTab(null)} className="sidebar-close-btn">
                 ✕
               </button>
             </div>
 
             <div className="sidebar-content">
-              {sidebarTab === "outline" ? (
+              {sidebarTab === "outline" && (
                 outline.length > 0 ? (
                   <ul className="outline-list">
                     {outline.map((item, idx) => (
@@ -496,7 +725,9 @@ export default function Reader() {
                     <p>No table of contents outline found in this PDF.</p>
                   </div>
                 )
-              ) : (
+              )}
+
+              {sidebarTab === "bookmarks" && (
                 bookmarks.length > 0 ? (
                   <ul className="bookmarks-list">
                     {bookmarks.map((bm) => (
@@ -527,6 +758,39 @@ export default function Reader() {
                     <button className="sidebar-action-btn" onClick={toggleBookmark}>
                       + Bookmark Page {currentPage}
                     </button>
+                  </div>
+                )
+              )}
+
+              {sidebarTab === "highlights" && (
+                highlights.length > 0 ? (
+                  <ul className="bookmarks-list">
+                    {highlights.map((hl) => (
+                      <li key={hl.id} className="bookmark-item highlight-item">
+                        <div
+                          className="bookmark-click-zone"
+                          onClick={() => {
+                            jumpToPage(hl.page);
+                          }}
+                        >
+                          <div className={`hl-swatch ${hl.color}`} />
+                          <span className="hl-text-preview">"{hl.text}"</span>
+                          <span className="bookmark-date">p.{hl.page}</span>
+                        </div>
+                        <button
+                          className="bookmark-delete-btn"
+                          onClick={() => setHighlights((prev) => prev.filter((h) => h.id !== hl.id))}
+                          title="Remove highlight"
+                        >
+                          ✕
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="sidebar-empty">
+                    <p>No highlights yet.</p>
+                    <p style={{fontSize: 12, marginTop: 8}}>Select any text in the book and choose a color to highlight it.</p>
                   </div>
                 )
               )}
@@ -561,6 +825,7 @@ export default function Reader() {
                     width={pageWidth}
                     renderAnnotationLayer={false}
                     renderTextLayer={true}
+                    customTextRenderer={textRenderer}
                     loading=""
                     className="pdf-page-canvas"
                   />
@@ -581,6 +846,7 @@ export default function Reader() {
                         width={pageWidth}
                         renderAnnotationLayer={false}
                         renderTextLayer={true}
+                        customTextRenderer={textRenderer}
                         loading=""
                         className="pdf-page-canvas"
                       />
@@ -595,9 +861,15 @@ export default function Reader() {
         </main>
       </div>
 
-      {/* Floating selection action buttons: "Define" + "Ask AI" */}
+      {/* Floating selection action buttons: "Define" + "Ask AI" + Highlights */}
       {askButton && (
         <div className="floating-actions" style={{ left: askButton.x, top: askButton.y - 48 }}>
+          <div className="highlight-colors">
+            <button className="hl-btn yellow" onClick={() => addHighlight("yellow")} title="Highlight yellow"></button>
+            <button className="hl-btn green" onClick={() => addHighlight("green")} title="Highlight green"></button>
+            <button className="hl-btn pink" onClick={() => addHighlight("pink")} title="Highlight pink"></button>
+            <button className="hl-btn blue" onClick={() => addHighlight("blue")} title="Highlight blue"></button>
+          </div>
           <button
             className="define-floating"
             onClick={() => {
@@ -635,9 +907,15 @@ export default function Reader() {
         open={panelOpen}
         selectedText={selection}
         initialQuery={initialQuery}
+        bookId={id}
         onClose={() => setPanelOpen(false)}
         onQueryConsumed={() => setInitialQuery("")}
       />
+
+      {/* Ambient Audio Player */}
+      {ambientTrack !== "none" && (
+        <audio src={ambientTrack} autoPlay loop style={{ display: "none" }} />
+      )}
     </div>
   );
 }

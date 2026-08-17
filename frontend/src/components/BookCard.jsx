@@ -23,9 +23,19 @@ function hashString(str = "") {
   return Math.abs(hash);
 }
 
-export default function BookCard({ book, onDelete, viewMode = "grid" }) {
+export default function BookCard({ book, onDelete, onSummarize, viewMode = "grid" }) {
   const navigate = useNavigate();
-  const [c1, c2] = BINDINGS[hashString(book.title) % BINDINGS.length];
+  const hash = hashString(book.title);
+  const [c1, c2] = BINDINGS[hash % BINDINGS.length];
+  
+  // Algorithmic background generator
+  let bgStyle = "";
+  const type = hash % 5;
+  if (type === 0) bgStyle = `linear-gradient(155deg, ${c1} 0%, ${c2} 100%)`;
+  else if (type === 1) bgStyle = `radial-gradient(circle at 20% 30%, ${c1}, ${c2})`;
+  else if (type === 2) bgStyle = `linear-gradient(45deg, ${c1} 30%, ${c2} 90%)`;
+  else if (type === 3) bgStyle = `linear-gradient(to right bottom, ${c1}, #00000030, ${c2})`;
+  else bgStyle = `radial-gradient(ellipse at bottom right, ${c1}, ${c2})`;
   const hasPages = Boolean(book.page_count);
   const progressPct = hasPages
     ? Math.min(100, Math.round((book.current_page / book.page_count) * 100))
@@ -37,7 +47,7 @@ export default function BookCard({ book, onDelete, viewMode = "grid" }) {
       <div className={`book-list-item ${isFinished ? "finished" : ""}`}>
         <div
           className="book-list-spine"
-          style={{ background: `linear-gradient(135deg, ${c1}, ${c2})` }}
+          style={{ background: bgStyle }}
           onClick={() => navigate(`/book/${book.id}`)}
         >
           <span>📖</span>
@@ -78,6 +88,13 @@ export default function BookCard({ book, onDelete, viewMode = "grid" }) {
             {progressPct > 0 ? "Continue" : "Read"} →
           </button>
           <button
+            className="book-list-action-btn"
+            onClick={onSummarize}
+            title="Generate AI Summary"
+          >
+            ✨ Summarize
+          </button>
+          <button
             className="book-list-delete-btn"
             onClick={onDelete}
             title="Delete book"
@@ -95,7 +112,7 @@ export default function BookCard({ book, onDelete, viewMode = "grid" }) {
     <div className={`book-card ${isFinished ? "finished" : ""}`}>
       <button
         className="book-cover"
-        style={{ background: `linear-gradient(155deg, ${c1} 0%, ${c2} 100%)` }}
+        style={{ background: bgStyle }}
         onClick={() => navigate(`/book/${book.id}`)}
         aria-label={`Open ${book.title}`}
       >
@@ -130,9 +147,14 @@ export default function BookCard({ book, onDelete, viewMode = "grid" }) {
         </p>
       </div>
 
-      <button className="book-delete" onClick={onDelete} aria-label={`Remove ${book.title}`} title="Remove book">
-        ✕
-      </button>
+      <div className="book-card-actions">
+        <button className="book-summarize" onClick={onSummarize} aria-label={`Summarize ${book.title}`} title="AI Summary">
+          ✨
+        </button>
+        <button className="book-delete" onClick={onDelete} aria-label={`Remove ${book.title}`} title="Remove book">
+          ✕
+        </button>
+      </div>
     </div>
   );
 }

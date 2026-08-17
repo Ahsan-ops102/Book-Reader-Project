@@ -28,10 +28,12 @@ function getStreakData() {
 }
 
 export default function Library() {
+  const navigate = useNavigate();
   const [books, setBooks] = useState(null); // null = loading
   const [uploading, setUploading] = useState(null); // { name, progress } | null
   const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState("books"); // "books" | "stats"
+  const [refreshCount, setRefreshCount] = useState(0);
+  const [activeTab, setActiveTab] = useState("books"); // "books" | "stats" | "flashcards"
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all"); // "all" | "reading" | "completed" | "unread"
   const [sortBy, setSortBy] = useState("recent"); // "recent" | "title-asc" | "progress-desc" | "newest"
@@ -76,7 +78,6 @@ export default function Library() {
     if (file) processPdfFile(file);
   }
 
-  // Drag-and-drop handlers for smooth file dropping anywhere on shelf
   function handleDragEnter(e) {
     e.preventDefault();
     e.stopPropagation();
@@ -120,18 +121,15 @@ export default function Library() {
     }
   }
 
-  // Filtered & Sorted books (Zero-lag memoized)
   const filteredBooks = useMemo(() => {
     if (!books) return [];
     let list = [...books];
 
-    // 1. Search query filter
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       list = list.filter((b) => b.title?.toLowerCase().includes(q));
     }
 
-    // 2. Status filter
     if (statusFilter === "reading") {
       list = list.filter((b) => b.page_count && b.current_page > 1 && b.current_page < b.page_count);
     } else if (statusFilter === "completed") {
@@ -140,7 +138,6 @@ export default function Library() {
       list = list.filter((b) => !b.page_count || b.current_page <= 1);
     }
 
-    // 3. Sorting
     if (sortBy === "title-asc") {
       list.sort((a, b) => a.title.localeCompare(b.title));
     } else if (sortBy === "progress-desc") {
@@ -152,12 +149,10 @@ export default function Library() {
     } else if (sortBy === "newest") {
       list.sort((a, b) => new Date(b.uploaded_at || 0) - new Date(a.uploaded_at || 0));
     }
-    // "recent" is the default ordering returned by the backend (by progress updated_at)
 
     return list;
   }, [books, searchQuery, statusFilter, sortBy]);
 
-  // Total counts for filter chips
   const counts = useMemo(() => {
     if (!books) return { all: 0, reading: 0, completed: 0, unread: 0 };
     let reading = 0;
@@ -179,7 +174,6 @@ export default function Library() {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {/* Drop zone overlay */}
       {isDragging && (
         <div className="drag-drop-overlay">
           <div className="drag-drop-card">
@@ -190,7 +184,6 @@ export default function Library() {
         </div>
       )}
 
-      {/* Header */}
       <header className="library-header">
         <div className="header-brand">
           <div className="header-title-row">
@@ -220,7 +213,6 @@ export default function Library() {
         </div>
       </header>
 
-      {/* Tab navigation */}
       <div className="library-tabs-bar">
         <div className="library-tabs">
           <button
@@ -228,13 +220,18 @@ export default function Library() {
             onClick={() => setActiveTab("books")}
           >
             📚 My Books
-            {books?.length > 0 && <span className="tab-badge">{books.length}</span>}
           </button>
           <button
             className={`library-tab ${activeTab === "stats" ? "active" : ""}`}
             onClick={() => setActiveTab("stats")}
           >
             📊 Reading Stats
+          </button>
+          <button
+            className={`library-tab ${activeTab === "flashcards" ? "active" : ""}`}
+            onClick={() => setActiveTab("flashcards")}
+          >
+            🗂️ Flashcards
           </button>
         </div>
       </div>
@@ -259,66 +256,36 @@ export default function Library() {
         </div>
       )}
 
-      {activeTab === "books" ? (
-        <>
-          {/* Search, Filter & Controls Toolbar */}
-          {books && books.length > 0 && (
-            <div className="library-controls-toolbar">
-              {/* Search input */}
-              <div className="library-search-box">
-                <span className="search-icon">🔍</span>
-                <input
-                  type="text"
-                  placeholder="Search books by title…"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="search-input"
-                />
-                {searchQuery && (
-                  <button className="search-clear-btn" onClick={() => setSearchQuery("")}>
-                    ✕
-                  </button>
-                )}
-              </div>
+      <main className="library-main">
+        {activeTab === "books" ? (
+          <>
+            {books && books.length > 0 && (
+              <div className="library-controls-toolbar">
+                <div className="library-search-box">
+                  <span className="search-icon">🔍</span>
+                  <input
+                    type="text"
+                    placeholder="Search books by title…"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="search-input"
+                  />
+                  {searchQuery && (
+                    <button className="search-clear-btn" onClick={() => setSearchQuery("")}>
+                      ✕
+                    </button>
+                  )}
+                </div>
 
-              {/* Status Filter Chips */}
-              <div className="filter-chips">
-                <button
-                  className={`filter-chip ${statusFilter === "all" ? "active" : ""}`}
-                  onClick={() => setStatusFilter("all")}
-                >
-                  All ({counts.all})
-                </button>
-                <button
-                  className={`filter-chip ${statusFilter === "reading" ? "active" : ""}`}
-                  onClick={() => setStatusFilter("reading")}
-                >
-                  Reading ({counts.reading})
-                </button>
-                <button
-                  className={`filter-chip ${statusFilter === "completed" ? "active" : ""}`}
-                  onClick={() => setStatusFilter("completed")}
-                >
-                  Finished ({counts.completed})
-                </button>
-                <button
-                  className={`filter-chip ${statusFilter === "unread" ? "active" : ""}`}
-                  onClick={() => setStatusFilter("unread")}
-                >
-                  Unread ({counts.unread})
-                </button>
-              </div>
+                <div className="filter-chips">
+                  <button className={`filter-chip ${statusFilter === "all" ? "active" : ""}`} onClick={() => setStatusFilter("all")}>All ({counts.all})</button>
+                  <button className={`filter-chip ${statusFilter === "reading" ? "active" : ""}`} onClick={() => setStatusFilter("reading")}>Reading ({counts.reading})</button>
+                  <button className={`filter-chip ${statusFilter === "completed" ? "active" : ""}`} onClick={() => setStatusFilter("completed")}>Finished ({counts.completed})</button>
+                  <button className={`filter-chip ${statusFilter === "unread" ? "active" : ""}`} onClick={() => setStatusFilter("unread")}>Unread ({counts.unread})</button>
+                </div>
 
-              <div className="toolbar-right-controls">
-                {/* Sort dropdown */}
-                <div className="sort-dropdown-wrap">
-                  <label htmlFor="sort-select" className="sort-label">Sort:</label>
-                  <select
-                    id="sort-select"
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                    className="sort-select"
-                  >
+                <div className="toolbar-right-controls">
+                  <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="sort-select">
                     <option value="recent">Recently Read</option>
                     <option value="title-asc">Title (A to Z)</option>
                     <option value="progress-desc">Highest Progress</option>
@@ -346,7 +313,6 @@ export default function Library() {
                   </button>
                 </div>
               </div>
-            </div>
           )}
 
           {/* Book List / Grid Display */}
@@ -377,31 +343,96 @@ export default function Library() {
             </div>
           ) : viewMode === "grid" ? (
             <div className="library-grid">
-              {filteredBooks.map((book) => (
+              {filteredBooks.map((b) => (
                 <BookCard
-                  key={book.id}
-                  book={book}
+                  key={b.id}
+                  book={b}
                   viewMode="grid"
-                  onDelete={() => handleDelete(book.id, book.title)}
+                  onDelete={(e) => {
+                    e.stopPropagation();
+                    handleDelete(b.id, b.title);
+                  }}
+                  onSummarize={(e) => {
+                    e.stopPropagation();
+                    navigate(`/book/${b.id}?action=summarize`);
+                  }}
                 />
               ))}
             </div>
           ) : (
             <div className="library-list-container">
-              {filteredBooks.map((book) => (
+              {filteredBooks.map((b) => (
                 <BookCard
-                  key={book.id}
-                  book={book}
+                  key={b.id}
+                  book={b}
                   viewMode="list"
-                  onDelete={() => handleDelete(book.id, book.title)}
+                  onDelete={(e) => {
+                    e.stopPropagation();
+                    handleDelete(b.id, b.title);
+                  }}
+                  onSummarize={(e) => {
+                    e.stopPropagation();
+                    navigate(`/book/${b.id}?action=summarize`);
+                  }}
                 />
               ))}
             </div>
           )}
         </>
+      ) : activeTab === "flashcards" ? (
+        <div className="flashcards-view">
+          <h2>Your Flashcards</h2>
+          {books && books.filter(b => {
+            const cards = JSON.parse(localStorage.getItem(`reader_fc_${b.id}`)) || [];
+            return cards.length > 0;
+          }).length === 0 ? (
+            <div className="library-empty">
+              <div className="empty-icon">🗂️</div>
+              <h2>No flashcards yet</h2>
+              <p>Open a book, select text, Ask AI, and save the response as a flashcard!</p>
+            </div>
+          ) : (
+            <div className="flashcard-groups">
+              {books && books.map(b => {
+                const cards = JSON.parse(localStorage.getItem(`reader_fc_${b.id}`)) || [];
+                if (cards.length === 0) return null;
+                return (
+                  <div key={b.id} className="flashcard-book-group">
+                    <h3 className="fc-book-title">{b.title}</h3>
+                    <div className="flashcard-grid">
+                      {cards.map(card => (
+                        <div key={card.id} className="flashcard">
+                          <div className="fc-inner">
+                            <div className="fc-front">
+                              <span className="fc-label">Q</span>
+                              <p>{card.front}</p>
+                            </div>
+                            <div className="fc-back">
+                              <span className="fc-label">A</span>
+                              <p>{card.back}</p>
+                            </div>
+                          </div>
+                          <button 
+                            className="fc-delete-btn"
+                            onClick={() => {
+                              const newCards = cards.filter(c => c.id !== card.id);
+                              localStorage.setItem(`reader_fc_${b.id}`, JSON.stringify(newCards));
+                              setRefreshCount(r => r + 1); // trigger re-render
+                            }}
+                          >✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       ) : (
         <StatsPanel books={books} />
       )}
+      </main>
     </div>
   );
 }

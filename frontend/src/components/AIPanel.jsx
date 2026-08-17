@@ -35,8 +35,8 @@ const QUICK_ACTIONS = [
   },
 ];
 
-const AIPanel = forwardRef(function AIPanel(
-  { open, selectedText, initialQuery, onClose, onQueryConsumed },
+export default forwardRef(function AIPanel(
+  { open, onClose, selectedText, initialQuery, onQueryConsumed, bookId },
   ref
 ) {
   const [question, setQuestion] = useState("");
@@ -111,6 +111,23 @@ const AIPanel = forwardRef(function AIPanel(
   function clearHistory() {
     setMessages([]);
     setError("");
+  }
+
+  function saveFlashcard(msg, prevMsg) {
+    if (!bookId) return;
+    try {
+      const existing = JSON.parse(localStorage.getItem(`reader_fc_${bookId}`)) || [];
+      const newCard = {
+        id: Date.now().toString(),
+        front: prevMsg ? prevMsg.text : "AI Note",
+        back: msg.text,
+        date: new Date().toLocaleDateString()
+      };
+      localStorage.setItem(`reader_fc_${bookId}`, JSON.stringify([...existing, newCard]));
+      alert("Saved to flashcards!");
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   return (
@@ -193,13 +210,22 @@ const AIPanel = forwardRef(function AIPanel(
               <div className="ai-message-footer">
                 <span className="ai-message-time">{msg.time}</span>
                 {msg.role === "ai" && (
-                  <button
-                    className="ai-copy-btn"
-                    onClick={() => handleCopy(msg.text, idx)}
-                    title="Copy to clipboard"
-                  >
-                    {copiedIdx === idx ? "✓ Copied" : "📋 Copy"}
-                  </button>
+                  <>
+                    <button
+                      className="ai-copy-btn"
+                      onClick={() => handleCopy(msg.text, idx)}
+                      title="Copy to clipboard"
+                    >
+                      {copiedIdx === idx ? "✓ Copied" : "📋 Copy"}
+                    </button>
+                    <button
+                      className="ai-copy-btn"
+                      onClick={() => saveFlashcard(msg, idx > 0 ? messages[idx-1] : null)}
+                      title="Save as Flashcard"
+                    >
+                      🗂️ Save Card
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -256,5 +282,3 @@ const AIPanel = forwardRef(function AIPanel(
     </aside>
   );
 });
-
-export default AIPanel;
