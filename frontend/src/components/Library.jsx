@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import BookCard from "./BookCard.jsx";
 import StatsPanel from "./StatsPanel.jsx";
 import { listBooks, uploadBook, deleteBook } from "../api.js";
