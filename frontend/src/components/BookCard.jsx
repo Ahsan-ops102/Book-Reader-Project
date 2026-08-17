@@ -57,7 +57,7 @@ export default function BookCard({ book, onDelete, onSummarize, viewMode = "grid
   else bgStyle = `radial-gradient(ellipse at bottom right, ${c1}, ${c2})`;
 
   // AI Generated Book Cover
-  const prompt = `Detailed realistic illustration for a book titled '${book.title}'. Thematic, highly relevant to the words in the title, centered, aesthetically pleasing book cover design. No text, clean composition, 4k digital art.`;
+  const prompt = `Search your knowledge base for the real book titled '${book.title}'. Generate a highly accurate and exact recreation of its official published book cover. Authentic typography, correct visual themes, masterpiece, 4k resolution.`;
   const coverUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=400&height=600&nologo=true&seed=${hash}`;
 
   const hasPages = Boolean(book.page_count);

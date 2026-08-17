@@ -316,8 +316,9 @@ export default function Reader() {
   function onDocumentLoad(pdf) {
     setPdfDoc(pdf);
     
-    // Compute aspect ratio first, then set numPages so scroll restoration uses the right height
-    pdf.getPage(1).then((page) => {
+    // Compute aspect ratio using page 2 (interior pages) because covers often have irregular ratios
+    const targetPageNum = Math.min(2, pdf.numPages || 1);
+    pdf.getPage(targetPageNum).then((page) => {
       const viewport = page.getViewport({ scale: 1 });
       setPageRatio(viewport.height / viewport.width);
       
