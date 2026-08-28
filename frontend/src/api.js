@@ -1,4 +1,5 @@
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+const _API_URL_RAW = import.meta.env.VITE_API_URL || "http://localhost:3001";
+const API_URL = _API_URL_RAW.replace(/\/$/, "");
 const PASSWORD_KEY = "reader_app_password";
 
 export function getAppPassword() {
@@ -149,6 +150,8 @@ export function saveDocument(id, html, title) {
 export function deleteDocument(id) {
   return apiFetch(`/api/documents/${id}`, { method: "DELETE" });
 }
+
+
 
 export function uploadDocument(file, title, onProgress) {
   return new Promise((resolve, reject) => {
