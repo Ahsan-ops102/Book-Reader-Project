@@ -25,7 +25,7 @@ app.use(
     },
   })
 );
-app.use(express.json({ limit: "5mb" }));
+app.use(express.json({ limit: "50mb" }));
 
 // Simple shared-password gate. Only active once APP_PASSWORD is set in .env —
 // leave it blank for local development so there's no friction.

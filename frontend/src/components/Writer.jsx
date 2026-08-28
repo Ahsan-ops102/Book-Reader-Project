@@ -343,7 +343,16 @@ export default function Writer() {
       // We need to convert it to HTML client-side with mammoth
       const mammoth = await import("mammoth");
       const arrayBuffer = await file.arrayBuffer();
-      const result = await mammoth.convertToHtml({ arrayBuffer });
+      const options = {
+        convertImage: mammoth.images.imgElement(function(image) {
+          return image.read("base64").then(function(imageBuffer) {
+            return {
+              src: "data:" + image.contentType + ";base64," + imageBuffer
+            };
+          });
+        })
+      };
+      const result = await mammoth.convertToHtml({ arrayBuffer }, options);
       const html = result.value;
       // Save the HTML version back to the cloud
       await saveDocument(id, html, title);
@@ -410,20 +419,32 @@ export default function Writer() {
   // ── AI Fix (preserves HTML formatting) ─────────────────
   async function handleFix() {
     if (!editor || fixing) return;
-    const html = editor.getHTML();
-    const text = editor.getText();
-    if (!text.trim()) { setBanner({ type: "error", msg: "Nothing to fix — the document is empty." }); return; }
+    
+    const { from, to } = editor.state.selection;
+    const selectedText = editor.state.doc.textBetween(from, to, "\n");
+    const isSelection = selectedText && selectedText.trim().length > 0;
+    
+    const textToFix = isSelection ? selectedText : editor.getText();
+    
+    if (!textToFix.trim()) { setBanner({ type: "error", msg: "Nothing to fix — the document or selection is empty." }); return; }
+    
     setFixing(true); setBanner(null);
     try {
-      const { fixedText } = await fixTextWithAI(text);
+      const { fixedText } = await fixTextWithAI(textToFix);
       // Rebuild as paragraphs preserving structure
       const paragraphs = fixedText.split(/\n\n+/);
       const fixedHtml = paragraphs.map(p => {
         const lines = p.split("\n").map(l => l.trim()).filter(Boolean);
         return `<p>${lines.join("<br>")}</p>`;
       }).join("");
-      editor.commands.setContent(fixedHtml);
-      setBanner({ type: "success", msg: "✅ All grammar and spelling errors have been fixed!" });
+      
+      if (isSelection) {
+        editor.chain().focus().deleteSelection().insertContent(fixedHtml).run();
+        setBanner({ type: "success", msg: "✅ Selection fixed!" });
+      } else {
+        editor.commands.setContent(fixedHtml);
+        setBanner({ type: "success", msg: "✅ All grammar and spelling errors have been fixed!" });
+      }
     } catch (err) {
       setBanner({ type: "error", msg: `Failed to fix: ${err.message || "Unknown error"}` });
     } finally { setFixing(false); }
