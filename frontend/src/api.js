@@ -1,5 +1,9 @@
-const _API_URL_RAW = import.meta.env.VITE_API_URL || "http://localhost:3001";
-const API_URL = _API_URL_RAW.replace(/\/$/, "");
+const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
+const defaultApiUrl = import.meta.env.DEV ? "" : window.location.origin;
+// Accept either the backend origin or an origin that already includes /api.
+const API_URL = (configuredApiUrl || defaultApiUrl)
+  .replace(/\/+$/, "")
+  .replace(/\/api$/i, "");
 const PASSWORD_KEY = "reader_app_password";
 
 export function getAppPassword() {
