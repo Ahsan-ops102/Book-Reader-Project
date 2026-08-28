@@ -164,7 +164,9 @@ export function uploadDocument(file, title, onProgress) {
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(JSON.parse(xhr.responseText));
       } else {
-        reject(new Error("Upload failed"));
+        let msg = `Upload failed (${xhr.status})`;
+        try { msg = JSON.parse(xhr.responseText).error || msg; } catch {}
+        reject(new Error(msg));
       }
     };
     xhr.onerror = () => reject(new Error("Upload failed"));

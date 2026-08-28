@@ -11,9 +11,10 @@ const upload = multer({
     const allowed = [
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "application/msword",
+      "application/octet-stream", // Sometimes generic for drag/drop
     ];
-    if (!allowed.includes(file.mimetype) && !file.originalname.match(/\.docx?$/i)) {
-      return cb(new Error("Only .docx files are accepted"));
+    if (!allowed.includes(file.mimetype) && (!file.originalname || !file.originalname.match(/\.docx?$/i))) {
+      return cb(null, false); // Silently drop, req.file will be undefined
     }
     cb(null, true);
   },
