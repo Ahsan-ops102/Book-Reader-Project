@@ -120,4 +120,63 @@ export function transformTextWithAI(text, operation) {
   });
 }
 
+// ── Document API ────────────────────────────────────────
 
+export function listDocuments() {
+  return apiFetch("/api/documents");
+}
+
+export function createDocument(title, html) {
+  return apiFetch("/api/documents/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, html }),
+  });
+}
+
+export function getDocumentContent(id) {
+  return apiFetch(`/api/documents/${id}/content`);
+}
+
+export function saveDocument(id, html, title) {
+  return apiFetch(`/api/documents/${id}/save`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ html, title }),
+  });
+}
+
+export function deleteDocument(id) {
+  return apiFetch(`/api/documents/${id}`, { method: "DELETE" });
+}
+
+export function uploadDocument(file, title, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_URL}/api/documents/upload`);
+    const pw = getAppPassword();
+    if (pw) xhr.setRequestHeader("x-app-password", pw);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText));
+      } else {
+        reject(new Error("Upload failed"));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Upload failed"));
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("title", title || file.name.replace(/\.docx?$/i, ""));
+    xhr.send(formData);
+  });
+}
+
+// Returns the raw file URL for downloading a docx from R2 (for mammoth conversion)
+export function documentContentUrl(id) {
+  return `${API_URL}/api/documents/${id}/content`;
+}

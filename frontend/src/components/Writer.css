@@ -929,6 +929,189 @@
   color: var(--text-muted);
 }
 
+/* ── Document Library Grid ────────────────────────────── */
+.doc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+  margin-top: 24px;
+}
+
+.doc-card {
+  background: var(--panel-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
+  overflow: hidden;
+  animation: fadeInUp 0.3s ease-out both;
+}
+
+.doc-grid .doc-card:nth-child(1) { animation-delay: 0.05s; }
+.doc-grid .doc-card:nth-child(2) { animation-delay: 0.10s; }
+.doc-grid .doc-card:nth-child(3) { animation-delay: 0.15s; }
+.doc-grid .doc-card:nth-child(4) { animation-delay: 0.20s; }
+
+.doc-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-lg), 0 0 0 3px rgba(232, 115, 74, 0.05);
+}
+
+.doc-card-icon {
+  font-size: 28px;
+  background: var(--bg-subtle);
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.doc-card:hover .doc-card-icon {
+  background: var(--accent-soft);
+  border-color: rgba(232, 115, 74, 0.2);
+}
+
+.doc-card-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.doc-card-title {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-family: var(--font-display);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.doc-card-delete {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: var(--panel-2);
+  border: none;
+  color: var(--text-muted);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.2s ease;
+}
+
+.doc-card:hover .doc-card-delete {
+  opacity: 1;
+}
+
+.doc-card-delete:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* ── Loading & Overlays ───────────────────────────────── */
+.writer-loading {
+  text-align: center;
+  padding: 80px 20px;
+  color: var(--text-muted);
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 0 auto 16px;
+}
+
+.writer-empty-state {
+  animation: fadeIn 0.4s ease-out;
+}
+
+.doc-loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(25, 20, 15, 0.7);
+  backdrop-filter: blur(8px);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.doc-loading-overlay .loading-spinner {
+  border-top-color: #fff;
+  border-right-color: rgba(255,255,255,0.3);
+  border-bottom-color: rgba(255,255,255,0.3);
+  border-left-color: rgba(255,255,255,0.3);
+}
+
+.drag-drop-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(232, 115, 74, 0.1);
+  backdrop-filter: blur(4px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 4px dashed var(--accent);
+  border-radius: 16px;
+  margin: 16px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.drag-drop-card {
+  background: var(--panel-solid);
+  padding: 40px 60px;
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  text-align: center;
+  animation: scaleIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.drag-drop-icon {
+  font-size: 56px;
+  display: block;
+  margin-bottom: 16px;
+}
+
+.cloud-badge {
+  background: rgba(59, 130, 246, 0.1) !important;
+  color: #3b82f6 !important;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600 !important;
+  font-size: 11px !important;
+}
+
 /* ── Responsive ──────────────────────────────────────── */
 @media (max-width: 768px) {
   .writer { padding: 20px 14px 60px; }
