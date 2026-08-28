@@ -103,3 +103,21 @@ export function uploadBook(file, title, onProgress) {
     xhr.send(formData);
   });
 }
+
+export function fixTextWithAI(text) {
+  return apiFetch("/api/ai/fix", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+}
+
+export function transformTextWithAI(text, operation) {
+  return apiFetch("/api/ai/transform", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, operation }),
+  });
+}
+
+

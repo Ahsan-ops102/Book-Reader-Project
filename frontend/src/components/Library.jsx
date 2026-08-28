@@ -268,6 +268,12 @@ export default function Library() {
           >
             🗂️ Flashcards
           </button>
+          <button
+            className={`library-tab ${activeTab === "writer" ? "active" : ""}`}
+            onClick={() => navigate("/writer")}
+          >
+            ✍️ Writer
+          </button>
         </div>
       </div>
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Routes, Route } from "react-router-dom";
 import Library from "./components/Library.jsx";
 import Reader from "./components/Reader.jsx";
+import Writer from "./components/Writer.jsx";
 import { listBooks, setAppPassword } from "./api.js";
 import "./App.css";
 
@@ -60,6 +61,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Library />} />
         <Route path="/book/:id" element={<Reader />} />
+        <Route path="/writer" element={<Writer />} />
       </Routes>
     </AuthGate>
   );
