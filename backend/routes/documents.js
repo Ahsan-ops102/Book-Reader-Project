@@ -151,20 +151,12 @@ router.put("/:id/save", async (req, res) => {
   if (!html) return res.status(400).json({ error: "No content provided" });
 
   try {
-    const result = await db.execute({
-      sql: "SELECT filename FROM documents WHERE id = ?",
-      args: [req.params.id],
-    });
-    if (result.rows.length === 0) return res.status(404).json({ error: "Document not found" });
+    const id = req.params.id;
+    const htmlFilename = `docs/${id}.html`;
+    const docxFilename = `docs/${id}.docx`;
 
-    // Always save as HTML (even if originally uploaded as .docx, once edited it becomes HTML)
-    const htmlFilename = `docs/${req.params.id}.html`;
-
-    // If the old file was a .docx, delete it and switch to .html
-    const oldFilename = result.rows[0].filename;
-    if (oldFilename !== htmlFilename) {
-      await deleteFromR2(oldFilename).catch(() => {});
-    }
+    // Optimistically delete the .docx file if it existed
+    await deleteFromR2(docxFilename).catch(() => {});
 
     await uploadToR2(htmlFilename, Buffer.from(html, "utf-8"), "text/html");
 
@@ -172,21 +164,29 @@ router.put("/:id/save", async (req, res) => {
     const plainText = html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
     const wordCount = plainText ? plainText.split(/\s+/).length : 0;
 
-    const updates = [
-      {
-        sql: "UPDATE documents SET filename = ?, word_count = ?, updated_at = datetime('now') WHERE id = ?",
-        args: [htmlFilename, wordCount, req.params.id],
-      },
-    ];
-
+    // Use UPSERT to avoid race conditions (eventual consistency) on replicas
     if (title) {
-      updates.push({
-        sql: "UPDATE documents SET title = ? WHERE id = ?",
-        args: [title, req.params.id],
+      await db.execute({
+        sql: `INSERT INTO documents (id, title, filename, word_count, updated_at)
+              VALUES (?, ?, ?, ?, datetime('now'))
+              ON CONFLICT(id) DO UPDATE SET
+              title = excluded.title,
+              filename = excluded.filename,
+              word_count = excluded.word_count,
+              updated_at = excluded.updated_at`,
+        args: [id, title, htmlFilename, wordCount],
+      });
+    } else {
+      await db.execute({
+        sql: `INSERT INTO documents (id, title, filename, word_count, updated_at)
+              VALUES (?, 'Untitled Document', ?, ?, datetime('now'))
+              ON CONFLICT(id) DO UPDATE SET
+              filename = excluded.filename,
+              word_count = excluded.word_count,
+              updated_at = excluded.updated_at`,
+        args: [id, htmlFilename, wordCount],
       });
     }
-
-    await db.batch(updates, "write");
 
     res.json({ ok: true, wordCount });
   } catch (err) {
