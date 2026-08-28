@@ -1,5 +1,7 @@
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
-const defaultApiUrl = import.meta.env.DEV ? "" : window.location.origin;
+const defaultApiUrl = import.meta.env.DEV
+  ? ""
+  : "https://book-reader-project.onrender.com";
 // Accept either the backend origin or an origin that already includes /api.
 const API_URL = (configuredApiUrl || defaultApiUrl)
   .replace(/\/+$/, "")
