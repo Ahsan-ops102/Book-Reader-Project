@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import BookCard from "./BookCard.jsx";
 import StatsPanel from "./StatsPanel.jsx";
-import { listBooks, uploadBook, deleteBook } from "../api.js";
+import { listBooks, uploadBook, deleteBook, clearAuthToken } from "../api.js";
 import "./Library.css";
 
 const STREAK_KEY = "reader_daily_streak_v1";
@@ -148,6 +148,11 @@ export default function Library() {
     }
   }
 
+  function handleLogout() {
+    clearAuthToken();
+    window.location.reload();
+  }
+
   const filteredBooks = useMemo(() => {
     if (!books) return [];
     let list = [...books];
@@ -237,6 +242,9 @@ export default function Library() {
         <div className="header-actions">
           <button className="add-button" onClick={() => fileInputRef.current?.click()}>
             <span className="add-plus">+</span> Add a book
+          </button>
+          <button className="add-button" style={{background: 'var(--panel-solid)', color: 'var(--text)', border: '1px solid var(--border)'}} onClick={handleLogout}>
+            Logout
           </button>
           <input
             ref={fileInputRef}

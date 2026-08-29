@@ -4,6 +4,8 @@ import cors from "cors";
 import booksRouter from "./routes/books.js";
 import aiRouter from "./routes/ai.js";
 import documentsRouter from "./routes/documents.js";
+import authRouter from "./routes/auth.js";
+import jwt from "jsonwebtoken";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -27,27 +29,36 @@ app.use(
 );
 app.use(express.json({ limit: "50mb" }));
 
-// Simple shared-password gate. Only active once APP_PASSWORD is set in .env —
-// leave it blank for local development so there's no friction.
+// JWT Authentication Middleware
+const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret_please_change_in_production";
+
 app.use((req, res, next) => {
-  if (!APP_PASSWORD) return next();
-  if (req.path === "/api/health") return next(); // let health checks through
-  const provided = req.header("x-app-password");
-  if (provided !== APP_PASSWORD) {
-    return res.status(401).json({ error: "Incorrect or missing password" });
+  if (req.path === "/api/health" || req.path.startsWith("/api/auth")) {
+    return next(); // Unprotected routes
   }
-  next();
+
+  const authHeader = req.header("Authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Missing or invalid authorization header" });
+  }
+
+  const token = authHeader.split(" ")[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded; // Attach user info to request
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: "Invalid or expired token" });
+  }
 });
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
+app.use("/api/auth", authRouter);
 app.use("/api/books", booksRouter);
 app.use("/api/ai", aiRouter);
 app.use("/api/documents", documentsRouter);
 
 app.listen(PORT, () => {
   console.log(`Reader backend running on http://localhost:${PORT}`);
-  if (!APP_PASSWORD) {
-    console.log("APP_PASSWORD is not set — running with no login gate (fine for local use).");
-  }
 });
 

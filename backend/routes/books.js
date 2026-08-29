@@ -27,7 +27,9 @@ router.get("/", async (_req, res) => {
               COALESCE(p.zoom, 1.0) AS zoom
        FROM books b
        LEFT JOIN progress p ON p.book_id = b.id
-       ORDER BY COALESCE(p.updated_at, b.uploaded_at) DESC`
+       WHERE b.user_id = ?
+       ORDER BY COALESCE(p.updated_at, b.uploaded_at) DESC`,
+      args: [req.user.id]
     );
     res.json(result.rows);
   } catch (err) {
@@ -52,8 +54,8 @@ router.post("/upload", upload.single("file"), async (req, res) => {
     await db.batch(
       [
         {
-          sql: "INSERT INTO books (id, title, filename) VALUES (?, ?, ?)",
-          args: [id, title, filename],
+          sql: "INSERT INTO books (id, title, filename, user_id) VALUES (?, ?, ?, ?)",
+          args: [id, title, filename, req.user.id],
         },
         {
           sql: "INSERT INTO progress (book_id, current_page) VALUES (?, 1)",
@@ -79,8 +81,8 @@ router.get("/:id", async (req, res) => {
                    COALESCE(p.zoom, 1.0) AS zoom
             FROM books b
             LEFT JOIN progress p ON p.book_id = b.id
-            WHERE b.id = ?`,
-      args: [req.params.id],
+            WHERE b.id = ? AND b.user_id = ?`,
+      args: [req.params.id, req.user.id],
     });
     if (result.rows.length === 0) return res.status(404).json({ error: "Book not found" });
     res.json(result.rows[0]);
@@ -94,8 +96,8 @@ router.get("/:id", async (req, res) => {
 router.get("/:id/file", async (req, res) => {
   try {
     const result = await db.execute({
-      sql: "SELECT filename FROM books WHERE id = ?",
-      args: [req.params.id],
+      sql: "SELECT filename FROM books WHERE id = ? AND user_id = ?",
+      args: [req.params.id, req.user.id],
     });
     if (result.rows.length === 0) return res.status(404).json({ error: "Book not found" });
 
@@ -120,8 +122,8 @@ router.patch("/:id/pages", async (req, res) => {
   try {
     const { pageCount } = req.body;
     await db.execute({
-      sql: "UPDATE books SET page_count = ? WHERE id = ?",
-      args: [pageCount, req.params.id],
+      sql: "UPDATE books SET page_count = ? WHERE id = ? AND user_id = ?",
+      args: [pageCount, req.params.id, req.user.id],
     });
     res.json({ ok: true });
   } catch (err) {
@@ -135,8 +137,8 @@ router.put("/:id/progress", async (req, res) => {
   try {
     const { currentPage, zoom } = req.body;
     await db.execute({
-      sql: "UPDATE progress SET current_page = ?, zoom = ?, updated_at = datetime('now') WHERE book_id = ?",
-      args: [currentPage, zoom ?? 1.0, req.params.id],
+      sql: "UPDATE progress SET current_page = ?, zoom = ?, updated_at = datetime('now') WHERE book_id IN (SELECT id FROM books WHERE id = ? AND user_id = ?)",
+      args: [currentPage, zoom ?? 1.0, req.params.id, req.user.id],
     });
     res.json({ ok: true });
   } catch (err) {
@@ -149,8 +151,8 @@ router.put("/:id/progress", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const result = await db.execute({
-      sql: "SELECT filename FROM books WHERE id = ?",
-      args: [req.params.id],
+      sql: "SELECT filename FROM books WHERE id = ? AND user_id = ?",
+      args: [req.params.id, req.user.id],
     });
     if (result.rows.length === 0) return res.status(404).json({ error: "Book not found" });
 
@@ -160,8 +162,8 @@ router.delete("/:id", async (req, res) => {
     );
 
     await db.execute({
-      sql: "DELETE FROM books WHERE id = ?",
-      args: [req.params.id],
+      sql: "DELETE FROM books WHERE id = ? AND user_id = ?",
+      args: [req.params.id, req.user.id],
     });
 
     res.json({ ok: true });

@@ -12,7 +12,7 @@ import Color from "@tiptap/extension-color";
 import {
   fixTextWithAI, transformTextWithAI,
   listDocuments, createDocument, getDocumentContent,
-  saveDocument, deleteDocument, uploadDocument,
+  saveDocument, deleteDocument, uploadDocument, clearAuthToken
 } from "../api.js";
 import "./Writer.css";
 
@@ -240,6 +240,11 @@ export default function Writer() {
   const [saving, setSaving] = useState(false);
   const dragCounterRef = useRef(0);
   const saveTimerRef = useRef(null);
+
+  function handleLogout() {
+    clearAuthToken();
+    window.location.reload();
+  }
 
   const editor = useEditor({
     extensions: [
@@ -516,6 +521,7 @@ export default function Writer() {
             <button className="writer-btn writer-btn-back" onClick={() => navigate("/")}>{icons.back} Library</button>
             <button className="writer-btn writer-btn-secondary" onClick={() => fileInputRef.current?.click()}>{icons.folder} Upload .docx</button>
             <button className="writer-btn writer-btn-primary" onClick={handleNewBlank}>+ New Document</button>
+            <button className="writer-btn writer-btn-secondary" style={{borderColor: 'var(--border)'}} onClick={handleLogout}>Logout</button>
           </div>
         </header>
 
@@ -576,6 +582,7 @@ export default function Writer() {
           <button className="writer-btn writer-btn-secondary" onClick={() => fileInputRef.current?.click()}>{icons.folder} Open</button>
           <button className="writer-btn writer-btn-secondary" onClick={handleManualSave} disabled={saving}>{saving ? "Saving…" : "💾 Save"}</button>
           <button className="writer-btn writer-btn-primary" onClick={handleExport}>{icons.download} Export .docx</button>
+          <button className="writer-btn writer-btn-secondary" style={{borderColor: 'var(--border)'}} onClick={handleLogout}>Logout</button>
           <button className="writer-btn writer-btn-ghost" onClick={() => setShowShortcuts(true)}>⌨️</button>
         </div>
       </header>

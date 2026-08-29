@@ -3,55 +3,98 @@ import { Routes, Route } from "react-router-dom";
 import Library from "./components/Library.jsx";
 import Reader from "./components/Reader.jsx";
 import Writer from "./components/Writer.jsx";
-import { listBooks, setAppPassword, clearAppPassword } from "./api.js";
+import { listBooks, getAuthToken, setAuthToken, clearAuthToken, loginUser, registerUser } from "./api.js";
 import "./App.css";
 
-// Gates the whole app behind a password ONLY if the backend has one set
-// (APP_PASSWORD in the backend .env). Locally, with no password set,
-// this resolves instantly and shows the app straight away.
+// Gates the whole app behind JWT authentication
 function AuthGate({ children }) {
-  const [status, setStatus] = useState("checking"); // checking | ok | needs-password
-  const [input, setInput] = useState("");
+  const [status, setStatus] = useState("checking"); // checking | ok | needs-login
+  const [isLogin, setIsLogin] = useState(true);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    // If no token exists, immediately show login
+    if (!getAuthToken()) {
+      setStatus("needs-login");
+      return;
+    }
+
     listBooks()
       .then(() => setStatus("ok"))
       .catch((err) => {
         if (err.message === "UNAUTHORIZED") {
-          clearAppPassword(); // Only clear here — user needs to re-enter
-          setStatus("needs-password");
+          clearAuthToken();
+          setStatus("needs-login");
         } else {
           setStatus("ok");
         }
       });
   }, []);
 
-  function submit(e) {
+  async function submit(e) {
     e.preventDefault();
-    setAppPassword(input);
-    listBooks()
-      .then(() => setStatus("ok"))
-      .catch(() => setError("That password didn't work."));
+    setError("");
+    setLoading(true);
+
+    try {
+      if (isLogin) {
+        const res = await loginUser(username, password);
+        setAuthToken(res.token);
+      } else {
+        const res = await registerUser(username, password);
+        setAuthToken(res.token);
+      }
+      setStatus("ok");
+    } catch (err) {
+      setError(err.message || "Authentication failed");
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (status === "checking") return null;
 
-  if (status === "needs-password") {
+  if (status === "needs-login") {
     return (
       <div className="auth-gate">
         <form className="auth-card" onSubmit={submit}>
           <h1>The Reading Room</h1>
-          <p>This library is password-protected.</p>
+          <p>{isLogin ? "Sign in to access your library." : "Create an account to get started."}</p>
+          <input
+            type="text"
+            autoFocus
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="Username"
+            required
+          />
           <input
             type="password"
-            autoFocus
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
+            required
           />
           {error && <p className="auth-error">{error}</p>}
-          <button type="submit">Enter</button>
+          <button type="submit" disabled={loading}>
+            {loading ? "Please wait..." : (isLogin ? "Sign In" : "Create Account")}
+          </button>
+          
+          <div style={{ marginTop: '16px', fontSize: '14px', textAlign: 'center' }}>
+            <span style={{ color: 'var(--text-muted)' }}>
+              {isLogin ? "Don't have an account? " : "Already have an account? "}
+            </span>
+            <button 
+              type="button" 
+              onClick={() => { setIsLogin(!isLogin); setError(""); }}
+              style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, fontWeight: 600 }}
+            >
+              {isLogin ? "Sign Up" : "Sign In"}
+            </button>
+          </div>
         </form>
       </div>
     );

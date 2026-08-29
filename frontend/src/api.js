@@ -6,21 +6,21 @@ const defaultApiUrl = import.meta.env.DEV
 const API_URL = (configuredApiUrl || defaultApiUrl)
   .replace(/\/+$/, "")
   .replace(/\/api$/i, "");
-const PASSWORD_KEY = "reader_app_password";
+const AUTH_TOKEN_KEY = "reader_auth_token";
 
-export function getAppPassword() {
-  return localStorage.getItem(PASSWORD_KEY) || "";
+export function getAuthToken() {
+  return localStorage.getItem(AUTH_TOKEN_KEY) || "";
 }
-export function setAppPassword(pw) {
-  localStorage.setItem(PASSWORD_KEY, pw);
+export function setAuthToken(token) {
+  localStorage.setItem(AUTH_TOKEN_KEY, token);
 }
-export function clearAppPassword() {
-  localStorage.removeItem(PASSWORD_KEY);
+export function clearAuthToken() {
+  localStorage.removeItem(AUTH_TOKEN_KEY);
 }
 
 function authHeaders() {
-  const pw = getAppPassword();
-  return pw ? { "x-app-password": pw } : {};
+  const token = getAuthToken();
+  return token ? { "Authorization": `Bearer ${token}` } : {};
 }
 
 async function apiFetch(path, options = {}) {
@@ -29,10 +29,7 @@ async function apiFetch(path, options = {}) {
     headers: { ...authHeaders(), ...(options.headers || {}) },
   });
   if (res.status === 401) {
-    // Don't clear the password here — it causes a cascade bug where a
-    // background call (e.g. listDocuments on mount) can silently wipe
-    // the stored password, breaking every subsequent request.
-    // The AuthGate component will re-prompt the user if needed.
+    // AuthGate handles displaying the login screen
     throw new Error("UNAUTHORIZED");
   }
   if (!res.ok) {
@@ -40,6 +37,22 @@ async function apiFetch(path, options = {}) {
     throw new Error(body.error || `Request failed (${res.status})`);
   }
   return res.status === 204 ? null : res.json();
+}
+
+export function loginUser(username, password) {
+  return apiFetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export function registerUser(username, password) {
+  return apiFetch("/api/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
 }
 
 export function listBooks() {
@@ -92,8 +105,8 @@ export function uploadBook(file, title, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${API_URL}/api/books/upload`);
-    const pw = getAppPassword();
-    if (pw) xhr.setRequestHeader("x-app-password", pw);
+    const token = getAuthToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
@@ -166,8 +179,8 @@ export function uploadDocument(file, title, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${API_URL}/api/documents/upload`);
-    const pw = getAppPassword();
-    if (pw) xhr.setRequestHeader("x-app-password", pw);
+    const token = getAuthToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
