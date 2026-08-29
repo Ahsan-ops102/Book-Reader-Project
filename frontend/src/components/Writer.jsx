@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useEditor, EditorContent } from "@tiptap/react";
+import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
@@ -431,17 +432,26 @@ export default function Writer() {
     setFixing(true); setBanner(null);
     try {
       const { fixedText } = await fixTextWithAI(textToFix);
-      // Rebuild as paragraphs preserving structure
-      const paragraphs = fixedText.split(/\n\n+/);
-      const fixedHtml = paragraphs.map(p => {
-        const lines = p.split("\n").map(l => l.trim()).filter(Boolean);
-        return `<p>${lines.join("<br>")}</p>`;
-      }).join("");
       
       if (isSelection) {
-        editor.chain().focus().deleteSelection().insertContent(fixedHtml).run();
+        // If it's a selection and it doesn't contain multiple paragraphs, insert it as plain text/inline
+        if (!textToFix.includes('\n')) {
+          editor.chain().focus().deleteSelection().insertContent(fixedText.trim().replace(/\n/g, ' ')).run();
+        } else {
+          const paragraphs = fixedText.split(/\n\n+/);
+          const fixedHtml = paragraphs.map(p => {
+            const lines = p.split("\n").map(l => l.trim()).filter(Boolean);
+            return `<p>${lines.join("<br>")}</p>`;
+          }).join("");
+          editor.chain().focus().deleteSelection().insertContent(fixedHtml).run();
+        }
         setBanner({ type: "success", msg: "✅ Selection fixed!" });
       } else {
+        const paragraphs = fixedText.split(/\n\n+/);
+        const fixedHtml = paragraphs.map(p => {
+          const lines = p.split("\n").map(l => l.trim()).filter(Boolean);
+          return `<p>${lines.join("<br>")}</p>`;
+        }).join("");
         editor.commands.setContent(fixedHtml);
         setBanner({ type: "success", msg: "✅ All grammar and spelling errors have been fixed!" });
       }
@@ -591,7 +601,16 @@ export default function Writer() {
         <span className="stat-item cloud-badge">☁️ Cloud</span>
       </div>
 
-      <div className="writer-editor-wrapper"><EditorContent editor={editor} /></div>
+      <div className="writer-editor-wrapper">
+        <EditorContent editor={editor} />
+        {editor && (
+          <BubbleMenu editor={editor} tippyOptions={{ duration: 100 }} className="bubble-menu">
+            <button className={`toolbar-btn toolbar-btn-fix ${fixing ? "fixing" : ""}`} onClick={handleFix} disabled={fixing} title="Fix selection with AI">
+              {fixing ? <><span className="fix-spinner"/> Fixing…</> : <>{icons.sparkles} Fix Selection</>}
+            </button>
+          </BubbleMenu>
+        )}
+      </div>
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
     </div>
   );
