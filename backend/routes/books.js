@@ -21,8 +21,8 @@ const router = express.Router();
 // List all books with their reading progress
 router.get("/", async (_req, res) => {
   try {
-    const result = await db.execute(
-      `SELECT b.id, b.title, b.page_count, b.uploaded_at,
+    const result = await db.execute({
+      sql: `SELECT b.id, b.title, b.page_count, b.uploaded_at,
               COALESCE(p.current_page, 1) AS current_page,
               COALESCE(p.zoom, 1.0) AS zoom
        FROM books b
@@ -30,7 +30,7 @@ router.get("/", async (_req, res) => {
        WHERE b.user_id = ?
        ORDER BY COALESCE(p.updated_at, b.uploaded_at) DESC`,
       args: [req.user.id]
-    );
+    });
     res.json(result.rows);
   } catch (err) {
     console.error("List books failed:", err);
