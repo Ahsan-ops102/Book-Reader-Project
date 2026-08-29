@@ -29,7 +29,10 @@ async function apiFetch(path, options = {}) {
     headers: { ...authHeaders(), ...(options.headers || {}) },
   });
   if (res.status === 401) {
-    clearAppPassword();
+    // Don't clear the password here — it causes a cascade bug where a
+    // background call (e.g. listDocuments on mount) can silently wipe
+    // the stored password, breaking every subsequent request.
+    // The AuthGate component will re-prompt the user if needed.
     throw new Error("UNAUTHORIZED");
   }
   if (!res.ok) {
@@ -172,13 +175,15 @@ export function uploadDocument(file, title, onProgress) {
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(JSON.parse(xhr.responseText));
+      } else if (xhr.status === 401) {
+        reject(new Error("UNAUTHORIZED"));
       } else {
         let msg = `Upload failed (${xhr.status})`;
         try { msg = JSON.parse(xhr.responseText).error || msg; } catch {}
         reject(new Error(msg));
       }
     };
-    xhr.onerror = () => reject(new Error("Upload failed"));
+    xhr.onerror = () => reject(new Error("Network error — check your connection"));
 
     const formData = new FormData();
     formData.append("file", file);
