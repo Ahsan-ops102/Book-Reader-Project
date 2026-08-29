@@ -19,7 +19,7 @@ const upload = multer({
 const router = express.Router();
 
 // List all books with their reading progress
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   try {
     const result = await db.execute({
       sql: `SELECT b.id, b.title, b.page_count, b.uploaded_at,

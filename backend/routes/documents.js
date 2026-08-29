@@ -23,7 +23,7 @@ const upload = multer({
 const router = express.Router();
 
 // List all documents, ordered by most recently edited
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   try {
     const result = await db.execute({
       sql: `SELECT id, title, word_count, created_at, updated_at
