@@ -9,11 +9,13 @@ import StatsPanel from './StatsPanel.jsx';
 import Study from './Study.jsx';
 import Dialog from './Dialog.jsx';
 import {prepareOfflineShell} from '../offlineShell.js';
+import { needsPdfCover } from '../coverQueue.js';
 export default function Library() {
   const nav = useNavigate(),
     input = useRef(null),
     cancel = useRef(false),
-    uploadBusy = useRef(false);
+    uploadBusy = useRef(false),
+    attemptedCovers = useRef(new Set());
   const [books, setBooks] = useState([]),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(''),
@@ -54,6 +56,15 @@ export default function Library() {
   }, [tab]);
   useEffect(() => {
     getConfig().then(c => setMaxMB(c.maxUploadMB)).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!loading && tab === 'books' && navigator.onLine && books.some(b => needsPdfCover(b) && !attemptedCovers.current.has(b.id))) fillMissingCovers({ automatic: true });
+  }, [books, loading, tab]);
+  useEffect(() => {
+    cancel.current = false;
+    const reconnect = () => { attemptedCovers.current.clear(); refresh(); };
+    window.addEventListener('online', reconnect);
+    return () => { cancel.current = true; window.removeEventListener('online', reconnect); };
   }, []);
   const tags = [...new Set(books.flatMap(b => b.state?.tags || []))].sort();
   const filtered = useMemo(() => {
@@ -124,15 +135,16 @@ export default function Library() {
     await cacheSet(`book:${b.id}`, b);
     setError(`“${b.title}” downloaded. ${await prepareOfflineShell()}`);
   }
-  async function fillMissingCovers() {
+  async function fillMissingCovers({ automatic = false } = {}) {
     if (uploadBusy.current) return;
-    const missing = books.filter(b => b.format !== 'epub' && (!b.cover_kind || b.cover_kind === 'placeholder'));
+    const missing = books.filter(b => needsPdfCover(b) && (!automatic || !attemptedCovers.current.has(b.id)));
     if (!missing.length) {
-      setError('Every PDF already has a cover. Choose Details & cover to change one.');
+      if (!automatic) setError('Every PDF already has a cover. Choose Details & cover to change one.');
       return;
     }
     uploadBusy.current = true;
     cancel.current = false;
+    missing.forEach(book => attemptedCovers.current.add(book.id));
     const batch = missing.map(book => ({
       name: book.title,
       status: 'Queued',
@@ -190,7 +202,7 @@ export default function Library() {
           setTag('all');
           setFavorite(false);
         }}>Reset</button></div>
- {tab === 'books' && <div className="action-row"><button disabled={uploadBusy.current} onClick={fillMissingCovers}>Fill missing PDF covers</button><small>Uses each PDF’s first page; keeps existing covers and titles.</small></div>}
+ {tab === 'books' && <div className="action-row"><button disabled={uploadBusy.current} onClick={fillMissingCovers}>Fill missing PDF covers</button><small>Missing PDF covers are filled automatically when you open your library. Existing covers and titles are kept.</small></div>}
  {tab === 'trash' && <p>Trashed books can be restored. Permanent deletion also removes their annotations and cannot be undone.</p>}
  {!!selected.length && tab === 'books' && <div className="notice"><span>{selected.length} books selected</span><button onClick={() => setConfirm({
           title: 'Share selected book details?',

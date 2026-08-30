@@ -260,6 +260,31 @@ test('AI context stays account-scoped and page-range summaries use only requeste
     assert.ok(!response.body.answer.includes('hidden thought'));
   } finally { globalThis.fetch=originalFetch; if (originalKey === undefined) delete process.env.GEMINI_API_KEY; else process.env.GEMINI_API_KEY=originalKey; }
 });
+test('selection explanations and quick meanings work without a prebuilt index', async () => {
+  const originalFetch = globalThis.fetch, originalKey = process.env.GEMINI_API_KEY, requests = [];
+  process.env.GEMINI_API_KEY = 'synthetic-test-key';
+  globalThis.fetch = async (target, options) => {
+    if (String(target).startsWith('https://generativelanguage.googleapis.com/')) {
+      requests.push(JSON.parse(options.body));
+      return new Response(JSON.stringify({candidates:[{finishReason:'STOP',content:{parts:[{text:'To focus is to direct your attention.'}]}}]}));
+    }
+    return originalFetch(target, options);
+  };
+  try {
+    await api(`/api/books/${bookId}/text`, 'PUT', {pages:[{page:1,text:''},{page:2,text:''}]}, alice);
+    for (const mode of ['meaning','explain']) {
+      const r = await api('/api/ai/query', 'POST', {bookId,selectedText:'focus',page:1,mode}, alice);
+      assert.equal(r.status,200); assert.match(r.body.answer,/attention/);
+      const sent = requests.at(-1);
+      assert.equal(JSON.parse(sent.contents[0].parts[0].text).selectedPassage,'focus');
+      assert.match(sent.systemInstruction.parts[0].text,mode==='meaning'?/one or two short sentences/:/entire selected/);
+    }
+    const count = requests.length;
+    assert.equal((await api('/api/ai/query','POST',{bookId,selectedText:'focus',mode:'meaning'},bob)).status,404);
+    assert.equal(requests.length,count);
+    assert.equal((await api('/api/ai/query','POST',{bookId,selectedText:'focus',mode:'invalid'},alice)).status,400);
+  } finally {globalThis.fetch=originalFetch; if(originalKey===undefined)delete process.env.GEMINI_API_KEY;else process.env.GEMINI_API_KEY=originalKey;}
+});
 test('finished dates are recorded only after an explicit status update',async () => {
   assert.equal((await api(`/api/books/${bookId}`,'GET',undefined,alice)).body.finished_at,null);
   await api(`/api/books/${bookId}`,'PATCH',{status:'finished'},alice);

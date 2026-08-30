@@ -68,6 +68,8 @@ async function context(req) {
 router.post('/query', route(async (req, res) => {
   const selected = text(req.body.selectedText, 'Selected text', 30000, true),
     question = text(req.body.question || 'Summarize this passage in a few sentences.', 'Question', 6000);
+  const mode = req.body.mode || 'question';
+  if (!['question', 'explain', 'meaning'].includes(mode)) fail(400, 'Unknown reading action.');
   const pages = await context(req);
   if (!selected && !pages.length) fail(400, 'Select a passage or index this book before asking about its contents.');
   const terms = [...new Set(question.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || [])];
@@ -89,7 +91,10 @@ router.post('/query', route(async (req, res) => {
   });
   const parts = await generate([{
     text: prompt
-  }]);
+  }], {
+    instruction: system + (mode === 'meaning' ? ' Give only the contextual meaning of the selected word or passage in one or two short sentences (at most 60 words). Do not add a preamble, a long analysis, or study questions.' : mode === 'explain' ? ' Explain the entire selected word or passage clearly and accessibly. Include a short example when useful. General language knowledge may be used to explain vocabulary; do not fabricate book context.' : ''),
+    tokens: mode === 'meaning' ? 2048 : 4096
+  });
   res.json({
     answer: parts.map(p => p.text || '').join(''),
     sources: ranked.map(p => p.page)
