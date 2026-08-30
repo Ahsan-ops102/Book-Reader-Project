@@ -29,3 +29,8 @@ body{font:15px/1.55 var(--font-body)}button,input,textarea,select{font:inherit}b
 .selection-secondary{margin-top:6px}.selection-primary .selection-bubble{flex:1}
 .selection-popover .quick-meaning{position:static;transform:none;flex:0 1 auto;min-height:0;width:100%;max-height:28vh;box-sizing:border-box;box-shadow:0 3px 12px #00000018}
 .selection-popover .quick-meaning small{font-size:10px;color:var(--text-muted)}
+
+.selection-popover:has(.quick-meaning) .selection-secondary{display:none}
+.selection-popover .quick-meaning .panel-header{gap:6px}
+.selection-popover .quick-meaning .panel-header small{font-size:9px;white-space:nowrap}
+.selection-popover .quick-meaning p{font-size:13px;line-height:1.5}
