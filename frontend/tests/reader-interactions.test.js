@@ -14,7 +14,7 @@ HTMLElement.prototype.getBoundingClientRect=()=>({left:0,top:100,right:800,botto
 const React=await import('react');const {act}=React;const {createRoot}=await import('react-dom/client');
 const calls=[], saves=[];let pendingMeaning;
 globalThis.readerMocks={
- state:{bookmarks:[],highlights:[],flashcards:[],tags:[],notes:'',chat:[{role:'ai',text:'x'.repeat(9000)}]},
+ state:{bookmarks:[],highlights:[],flashcards:[],tags:[],notes:'',chat:[{role:'user',text:'  '},{role:'ai',text:'x'.repeat(9000)}]},
  api: async (...args)=>{calls.push(args);if(args[2]?.mode==='meaning' && pendingMeaning)return pendingMeaning;return {answer:args[2]?.mode==='meaning'?'A short meaning.':'A full explanation.',sources:[]};},
  save:async(...args)=>{saves.push(args);return {version:1};}
 };
@@ -49,13 +49,24 @@ test('selection bubbles send once, quick meaning stays inline, and outside click
  await act(async()=>root.render(React.createElement(React.StrictMode,null,React.createElement(Reader))));await tick();await tick();
  await select();assert.ok(button('Quick meaning'));assert.ok(button('Explain'));
  await click(button('Quick meaning'));assert.equal(calls.length,1);assert.equal(calls[0][0],'Focus grows with practice.');assert.equal(calls[0][2].mode,'meaning');assert.ok(document.querySelector('.quick-meaning'));assert.equal(document.querySelector('.ai-chat'),null);
- await click(button('Explain'));assert.equal(calls.length,2);assert.equal(calls[1][2].mode,'explain');assert.equal(calls[1][2].history[0].text.length,6000);assert.ok(document.querySelector('.ai-chat').textContent.includes('A full explanation.'));
+ await click(button('Explain'));assert.equal(calls.length,2);assert.equal(calls[1][2].mode,'explain');assert.deepEqual(calls[1][2].history,[],'a fresh selection explanation does not reuse unrelated chat');assert.ok(document.querySelector('.ai-chat').textContent.includes('A full explanation.'));
  await act(async()=>document.querySelector('.ai-chat textarea').dispatchEvent(new Event('pointerdown',{bubbles:true})));assert.ok(document.querySelector('.ai-chat'));
  await act(async()=>document.querySelector('.reading-canvas').dispatchEvent(new Event('pointerdown',{bubbles:true})));assert.equal(document.querySelector('.ai-chat'),null);
 });
+test('selection settling does not erase a pending or completed quick answer',async()=>{
+ let resolve;pendingMeaning=new Promise(r=>resolve=r);await select();await click(button('Quick meaning'));
+ await act(async()=>{document.dispatchEvent(new Event('selectionchange'));await new Promise(r=>setTimeout(r,220));});
+ assert.ok(document.querySelector('.quick-meaning'),'loading bubble survives the same selection settling');
+ await act(async()=>{window.getSelection().removeAllRanges();document.dispatchEvent(new Event('selectionchange'));await new Promise(r=>setTimeout(r,220));});
+ assert.ok(document.querySelector('.quick-meaning'),'collapsing the native range does not lose the pending answer');
+ await act(async()=>resolve({answer:'The meaning remains visible.'}));pendingMeaning=null;
+ assert.match(document.querySelector('.quick-meaning')?.textContent||'',/meaning remains visible/);
+ await act(async()=>{document.dispatchEvent(new Event('selectionchange'));await new Promise(r=>setTimeout(r,220));});
+ assert.match(document.querySelector('.quick-meaning')?.textContent||'',/meaning remains visible/);
+});
 test('asking without a selection uses readable page text without manual indexing',async()=>{
  window.getSelection().removeAllRanges();await act(async()=>document.querySelector('.reading-canvas').dispatchEvent(new MouseEvent('mouseup',{bubbles:true})));
- await click(button('Ask AI'));await click(button('Explain'));assert.equal(calls.at(-1)[0].trim(),'Focus grows with practice.');
+ await click(button('Ask AI'));await click(button('Explain'));assert.equal(calls.at(-1)[0].trim(),'Focus grows with practice.');assert.ok(calls.at(-1)[2].history.every(m=>m.text.trim()));assert.equal(calls.at(-1)[2].history.find(m=>m.text.startsWith('xxxx')).text.length,6000);
  await act(async()=>window.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.equal(document.querySelector('.ai-chat'),null);
 });
 test('dismissing a pending quick meaning prevents a late popup',async()=>{

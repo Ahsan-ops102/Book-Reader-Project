@@ -369,7 +369,11 @@ function ReaderScreen({
   }, [search]);
   function capture() {
     const sel = window.getSelection();
-    if (!sel?.rangeCount || !sel.toString().trim()) { setSelection(null); return; }
+    if (!sel?.rangeCount || !sel.toString().trim()) {
+      // Touch browsers may collapse the native range when a bubble is pressed.
+      if (!assistant.quick) setSelection(null);
+      return;
+    }
     const range = sel.getRangeAt(0);
     if (!scroll.current?.contains(range.commonAncestorContainer)) return;
     const rects = [];
@@ -390,11 +394,14 @@ function ReaderScreen({
       }
     }
     const box = range.getBoundingClientRect();
-    assistant.clearQuick();
+    const selectedText = sel.toString().trim().slice(0, 30000), selectedPage = rects[0]?.page || page;
+    // selectionchange also fires after mouseup and when the text layer settles.
+    // Re-capturing the same selection must not discard an in-flight answer.
+    if (selectedText !== selection?.text || selectedPage !== selection?.page) assistant.clearQuick();
     setSelection({
       anchor: { x: Math.max(155, Math.min(window.innerWidth - 155, box.left + box.width / 2)), y: Math.max(65, Math.min(window.innerHeight - 200, box.top - 56)) },
-      text: sel.toString().trim().slice(0, 30000),
-      page: rects[0]?.page || page,
+      text: selectedText,
+      page: selectedPage,
       rects
     });
   }

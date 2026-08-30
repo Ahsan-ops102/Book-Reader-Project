@@ -279,11 +279,36 @@ test('selection explanations and quick meanings work without a prebuilt index', 
       assert.equal(JSON.parse(sent.contents[0].parts[0].text).selectedPassage,'focus');
       assert.match(sent.systemInstruction.parts[0].text,mode==='meaning'?/one or two short sentences/:/entire selected/);
     }
+    const followup = await api('/api/ai/query', 'POST', {bookId,selectedText:'focus',page:1,history:[{role:'user',text:'  '},{role:'ai',text:'Earlier answer.'}]}, alice);
+    assert.equal(followup.status,200,'blank saved messages must not block new questions');
+    assert.deepEqual(JSON.parse(requests.at(-1).contents[0].parts[0].text).conversation,[{role:'assistant',text:'Earlier answer.'}]);
     const count = requests.length;
     assert.equal((await api('/api/ai/query','POST',{bookId,selectedText:'focus',mode:'meaning'},bob)).status,404);
     assert.equal(requests.length,count);
     assert.equal((await api('/api/ai/query','POST',{bookId,selectedText:'focus',mode:'invalid'},alice)).status,400);
   } finally {globalThis.fetch=originalFetch; if(originalKey===undefined)delete process.env.GEMINI_API_KEY;else process.env.GEMINI_API_KEY=originalKey;}
+});
+test('AI provider errors are actionable and do not lock out the next request',async () => {
+  const originalFetch=globalThis.fetch, originalKey=process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY='synthetic-test-key';
+  let providerStatus=429;
+  globalThis.fetch=async(target,options)=>{
+    if (!String(target).startsWith('https://generativelanguage.googleapis.com/')) return originalFetch(target,options);
+    if (providerStatus==='timeout') throw new DOMException('Timed out','TimeoutError');
+    return new Response(JSON.stringify(providerStatus===200
+      ? {candidates:[{finishReason:'STOP',content:{parts:[{text:'A recovered answer.'}]}}]}
+      : {error:{message:'Private provider detail'}}),{status:providerStatus});
+  };
+  try {
+    for (const [status,expected,message] of [[429,429,/quota/],[403,502,/credentials/],[404,502,/model is unavailable/],['timeout',504,/too long/]]) {
+      providerStatus=status;
+      const response=await api('/api/ai/query','POST',{selectedText:'focus',mode:'meaning'},alice);
+      assert.equal(response.status,expected);assert.match(response.body.error,message);
+      assert.ok(!response.body.error.includes('Private provider detail'));
+      providerStatus=200;
+      assert.equal((await api('/api/ai/query','POST',{selectedText:'focus',mode:'meaning'},alice)).body.answer,'A recovered answer.');
+    }
+  } finally {globalThis.fetch=originalFetch;if(originalKey===undefined)delete process.env.GEMINI_API_KEY;else process.env.GEMINI_API_KEY=originalKey;}
 });
 test('finished dates are recorded only after an explicit status update',async () => {
   assert.equal((await api(`/api/books/${bookId}`,'GET',undefined,alice)).body.finished_at,null);

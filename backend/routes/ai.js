@@ -11,7 +11,9 @@ async function generate(parts, {
   image = false
 } = {}) {
   if (!process.env.GEMINI_API_KEY) fail(503, 'AI is not configured. Ask the administrator to add the Gemini API key.');
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+  let response;
+  try {
+    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -38,7 +40,23 @@ async function generate(parts, {
       }
     })
   });
-  if (!response.ok) fail(response.status === 429 ? 429 : 502, response.status === 429 ? 'AI quota reached. Please retry later.' : 'The AI provider could not complete this request.');
+  } catch (error) {
+    console.warn(JSON.stringify({event:'ai_provider_unavailable',model,reason:error.name}));
+    fail(error.name === 'TimeoutError' ? 504 : 502, error.name === 'TimeoutError'
+      ? 'The AI service took too long to respond. Please try again.'
+      : 'The AI service could not be reached. Please try again.');
+  }
+  if (!response.ok) {
+    // Never log API keys, prompts, book text, or the provider's raw response body.
+    console.warn(JSON.stringify({event:'ai_provider_rejected',model,status:response.status}));
+    fail(response.status === 429 ? 429 : 502, response.status === 429
+      ? 'AI quota reached. Please retry later.'
+      : response.status === 401 || response.status === 403
+        ? 'The AI provider rejected the server credentials. The administrator needs to check the Gemini key.'
+        : response.status === 404
+          ? 'The configured AI model is unavailable. The administrator needs to update the Gemini model.'
+          : 'The AI provider could not complete this request. Please try again.');
+  }
   const data = await response.json(),
     candidate = data.candidates?.[0];
   if (!candidate?.content?.parts?.length) fail(502, 'The AI returned no usable result.');
@@ -46,6 +64,10 @@ async function generate(parts, {
   return candidate.content.parts.filter(part => !part.thought);
 }
 router.use((req, res, next) => {
+  const started = Date.now(), action = req.path;
+  res.once('finish', () => console.info(JSON.stringify({
+    event:'ai_request',action,status:res.statusCode,durationMs:Date.now()-started
+  })));
   if (busy.has(req.user.id)) return res.status(429).json({
     error: 'An AI request is already running. Please wait.'
   });
@@ -53,13 +75,14 @@ router.use((req, res, next) => {
   res.once('close', () => busy.delete(req.user.id));
   next();
 });
-async function context(req) {
+async function context(req, includePages = true) {
   if (!req.body.bookId) return [];
   id(req.body.bookId);
   if (!(await db.execute({
     sql: 'SELECT id FROM books WHERE id=? AND user_id=? AND deleted_at IS NULL',
     args: [req.body.bookId, req.user.id]
   })).rows.length) fail(404, 'Book not found');
+  if (!includePages) return [];
   return (await db.execute({
     sql: 'SELECT page,text FROM book_pages WHERE book_id=? ORDER BY page',
     args: [req.body.bookId]
@@ -70,14 +93,16 @@ router.post('/query', route(async (req, res) => {
     question = text(req.body.question || 'Summarize this passage in a few sentences.', 'Question', 6000);
   const mode = req.body.mode || 'question';
   if (!['question', 'explain', 'meaning'].includes(mode)) fail(400, 'Unknown reading action.');
-  const pages = await context(req);
+  // A selected passage is sufficient for definitions and explanations. Avoid
+  // downloading the entire book index or mixing unrelated pages into that answer.
+  const pages = await context(req, !selected || mode === 'question');
   if (!selected && !pages.length) fail(400, 'Select a passage or index this book before asking about its contents.');
   const terms = [...new Set(question.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || [])];
   const ranked = pages.map(p => ({
     ...p,
     score: terms.reduce((n, t) => n + (p.text.toLowerCase().includes(t) ? 1 : 0), 0)
   })).sort((a, b) => b.score - a.score).slice(0, 6);
-  const history = Array.isArray(req.body.history) ? req.body.history.slice(-8).map(m => ({
+  const history = Array.isArray(req.body.history) ? req.body.history.filter(m => m && typeof m.text === 'string' && m.text.trim()).slice(-8).map(m => ({
     role: m.role === 'ai' ? 'assistant' : 'user',
     text: text(m.text, 'Conversation message', 6000)
   })) : [];
@@ -92,7 +117,7 @@ router.post('/query', route(async (req, res) => {
   const parts = await generate([{
     text: prompt
   }], {
-    instruction: system + (mode === 'meaning' ? ' Give only the contextual meaning of the selected word or passage in one or two short sentences (at most 60 words). Do not add a preamble, a long analysis, or study questions.' : mode === 'explain' ? ' Explain the entire selected word or passage clearly and accessibly. Include a short example when useful. General language knowledge may be used to explain vocabulary; do not fabricate book context.' : ''),
+    instruction: system + ' The selectedPassage is supplied source text, even when sources is empty. Explain it directly. You may use general language knowledge to define words and explain concepts without an indexed book. Only claims about other book content require supplied page evidence. Never refuse a normal vocabulary definition solely because indexed sources are empty.' + (mode === 'meaning' ? ' Give only the contextual meaning of the selected word or passage in one or two short sentences (at most 60 words). Do not add a preamble, a long analysis, or study questions.' : mode === 'explain' ? ' Explain the entire selected word or passage clearly and accessibly. Include a short example when useful. General language knowledge may be used to explain vocabulary; do not fabricate book context.' : ''),
     tokens: mode === 'meaning' ? 2048 : 4096
   });
   res.json({
