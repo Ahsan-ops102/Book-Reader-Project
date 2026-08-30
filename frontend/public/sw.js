@@ -31,8 +31,15 @@ self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
   if (event.request.mode === 'navigate') {
-    // Each worker must serve HTML from its own matching asset set.
-    event.respondWith(caches.open(CACHE).then(cache => cache.match('/index.html', {ignoreVary:true})).then(cached => cached || fetch(event.request,{cache:'no-store'})));
+    // Online reloads must get the current release, not an old cached reader.
+    // Keep this worker's matching shell as the fallback for offline reading.
+    event.respondWith((async () => {
+      try {
+        const response = await fetch(event.request, {cache:'no-store',signal:AbortSignal.timeout(2500)});
+        if (response.ok) return response;
+      } catch {}
+      return (await (await caches.open(CACHE)).match('/index.html', {ignoreVary:true})) || fetch(event.request);
+    })());
     return;
   }
   // Static hashes are identical for all origins/credentials; ignore host-added Vary: Origin.

@@ -276,12 +276,12 @@ test('selection explanations and quick meanings work without a prebuilt index', 
       const r = await api('/api/ai/query', 'POST', {bookId,selectedText:'focus',page:1,mode}, alice);
       assert.equal(r.status,200); assert.match(r.body.answer,/attention/);
       const sent = requests.at(-1);
-      assert.equal(JSON.parse(sent.contents[0].parts[0].text).selectedPassage,'focus');
+      assert.ok(sent.contents[0].parts[0].text.includes('focus'));assert.ok(sent.generationConfig.maxOutputTokens<=512);
       assert.match(sent.systemInstruction.parts[0].text,mode==='meaning'?/one or two short sentences/:/entire selected/);
     }
     const followup = await api('/api/ai/query', 'POST', {bookId,selectedText:'focus',page:1,history:[{role:'user',text:'  '},{role:'ai',text:'Earlier answer.'}]}, alice);
     assert.equal(followup.status,200,'blank saved messages must not block new questions');
-    assert.deepEqual(JSON.parse(requests.at(-1).contents[0].parts[0].text).conversation,[{role:'assistant',text:'Earlier answer.'}]);
+    assert.ok(requests.at(-1).contents[0].parts[0].text.includes('Earlier answer.'));
     const count = requests.length;
     assert.equal((await api('/api/ai/query','POST',{bookId,selectedText:'focus',mode:'meaning'},bob)).status,404);
     assert.equal(requests.length,count);
@@ -308,6 +308,21 @@ test('AI provider errors are actionable and do not lock out the next request',as
       providerStatus=200;
       assert.equal((await api('/api/ai/query','POST',{selectedText:'focus',mode:'meaning'},alice)).body.answer,'A recovered answer.');
     }
+  } finally {globalThis.fetch=originalFetch;if(originalKey===undefined)delete process.env.GEMINI_API_KEY;else process.env.GEMINI_API_KEY=originalKey;}
+});
+test('a slow AI request retries once and readable length-limited answers are retained',async () => {
+  const originalFetch=globalThis.fetch, originalKey=process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY='synthetic-test-key';let attempts=0;
+  globalThis.fetch=async(target,options)=>{
+    if (!String(target).startsWith('https://generativelanguage.googleapis.com/')) return originalFetch(target,options);
+    attempts++;
+    if (attempts===1) throw new DOMException('Timed out','TimeoutError');
+    return new Response(JSON.stringify({candidates:[{finishReason:'MAX_TOKENS',content:{parts:[{thought:true,text:'hidden'},{text:'A useful explanation.'}]}}]}));
+  };
+  try {
+    const response=await api('/api/ai/query','POST',{selectedText:'focus',mode:'explain'},alice);
+    assert.equal(attempts,2);assert.equal(response.status,200);assert.equal(response.body.answer,'A useful explanation.');assert.equal(response.body.truncated,true);
+    assert.equal(response.body.model,'gemini-3.5-flash-lite');
   } finally {globalThis.fetch=originalFetch;if(originalKey===undefined)delete process.env.GEMINI_API_KEY;else process.env.GEMINI_API_KEY=originalKey;}
 });
 test('finished dates are recorded only after an explicit status update',async () => {

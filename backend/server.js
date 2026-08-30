@@ -32,6 +32,7 @@ app.get('/api/config', (_req, res) => res.json({
   registration: process.env.REGISTRATION_MODE === 'open' ? 'open' : 'invite',
   maxUploadMB: Number(process.env.MAX_UPLOAD_MB || 64),
   aiEnabled: !!process.env.GEMINI_API_KEY,
+  aiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
   coverGenerationEnabled: !!process.env.GEMINI_COVER_MODEL && !!process.env.GEMINI_API_KEY
 }));
 app.use('/api/auth', authRouter);

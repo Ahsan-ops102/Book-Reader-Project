@@ -12,7 +12,7 @@ export default function AIPanel({
     [fromPage, setFromPage] = useState(page),
     [toPage, setToPage] = useState(page);
   const end = useRef(null),
-    messages = state.data.chat || [];
+    messages = assistant.messages;
   useEffect(() => {
     end.current?.scrollIntoView({
       block: 'nearest'
@@ -24,7 +24,7 @@ export default function AIPanel({
     setQuestion('');
     return assistant.send(value, { summary, range });
   }
-  return <aside className="reader-panel ai-chat" aria-label="Reading assistant"><div className="panel-header"><h2>Reading assistant</h2><button onClick={onClose} aria-label="Close assistant">×</button></div><p className="privacy-hint">Your selection or current page and relevant indexed pages are sent to Gemini. Answers can be wrong; check the cited pages.</p>{selectedText && <blockquote className="selection-preview">{selectedText.slice(0, 1200)}</blockquote>}<div className="action-row"><button disabled={busy || !state.ready} onClick={() => send('Explain this passage simply.')}>Explain</button><button disabled={busy || !state.ready} onClick={() => send('Define the key terms in this passage.')}>Define</button><button disabled={busy || !state.ready} onClick={() => send('Write a concise question and answer for studying this passage.')}>Study question</button><button disabled={busy || !state.ready} onClick={() => send('Summarize this book.', true)}>Book summary</button></div><details><summary>Summarize a chapter or page range</summary><label>First page<input type="number" min="1" value={fromPage} onChange={e => setFromPage(Number(e.target.value))} /></label><label>Last page<input type="number" min={fromPage} value={toPage} onChange={e => setToPage(Number(e.target.value))} /></label><button disabled={busy || !state.ready} onClick={() => send(`Summarize pages ${fromPage}–${toPage}.`, true, {
+  return <aside className="reader-panel ai-chat" aria-label="Reading assistant"><div className="panel-header"><h2>Reading assistant</h2><button onClick={onClose} aria-label="Close assistant">×</button></div><p className="privacy-hint">Model: {assistant.model}. Your selection or current page is sent to Gemini. Answers can be wrong; check the cited pages.</p>{selectedText && <blockquote className="selection-preview">{selectedText.slice(0, 1200)}</blockquote>}<div className="action-row"><button disabled={busy} onClick={() => send('Explain this passage simply.')}>Explain</button><button disabled={busy} onClick={() => send('Define the key terms in this passage.')}>Define</button><button disabled={busy} onClick={() => send('Write a concise question and answer for studying this passage.')}>Study question</button><button disabled={busy} onClick={() => send('Summarize this book.', true)}>Book summary</button></div><details><summary>Summarize a chapter or page range</summary><label>First page<input type="number" min="1" value={fromPage} onChange={e => setFromPage(Number(e.target.value))} /></label><label>Last page<input type="number" min={fromPage} value={toPage} onChange={e => setToPage(Number(e.target.value))} /></label><button disabled={busy} onClick={() => send(`Summarize pages ${fromPage}–${toPage}.`, true, {
         fromPage,
         toPage
       })}>Summarize these pages</button></details><div className="chat-messages">{messages.map((m, i) => <article key={i} className={`chat-message ${m.role}`}><small>{m.role === 'ai' ? 'Assistant' : 'You'}</small><p className="preserve-lines">{m.text}</p>{m.role === 'ai' && <><div className="action-row">{[...new Set([...m.text.matchAll(/\[p\.\s*(\d+)\]/g)].map(v => Number(v[1])))].map(p => <button key={p} onClick={() => onJump(p)}>Page {p}</button>)}</div><button onClick={() => {
@@ -37,8 +37,8 @@ export default function AIPanel({
               interval: 0
             }]);
             assistant.clearError();
-          }}>Save flashcard</button></>}</article>)}{busy && <p role="status">Reading the supplied sources…</p>}<div ref={end} /></div>{error && <p role="status" className="notice">{error}</p>}<form className="chat-input" onSubmit={e => {
+          }}>Save flashcard</button></>}</article>)}{busy && <div role="status"><p>{assistant.elapsed < 12 ? "Reading…" : "Gemini is taking longer; retrying if needed…"} {assistant.elapsed}s</p><button onClick={assistant.cancel}>Cancel request</button></div>}<div ref={end} /></div>{error && <div role="alert" className="notice">{error}<button disabled={busy} onClick={assistant.retry}>Try again</button></div>}<form className="chat-input" onSubmit={e => {
       e.preventDefault();
       send();
-    }}><label className="sr-only" htmlFor="ai-question">Your question</label><textarea id="ai-question" value={question} maxLength={6000} onChange={e => setQuestion(e.target.value)} placeholder="Ask about your selection or current page…" /><button className="primary" disabled={busy || !state.ready}>Ask</button></form><button className="text-button" onClick={() => state.update('chat', [])}>Clear this conversation</button></aside>;
+    }}><label className="sr-only" htmlFor="ai-question">Your question</label><textarea id="ai-question" value={question} maxLength={6000} onChange={e => setQuestion(e.target.value)} placeholder="Ask about your selection or current page…" /><button className="primary" disabled={busy}>Ask</button></form><button className="text-button" onClick={() => state.update('chat', [])}>Clear this conversation</button></aside>;
 }

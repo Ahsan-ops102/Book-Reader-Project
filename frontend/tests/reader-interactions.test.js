@@ -22,7 +22,7 @@ const source=`import React from 'react';export {default} from './src/components/
 let apiMock=`
 const m=globalThis.readerMocks;
 export const queryAI=(...a)=>m.api(...a),summarizeBook=async()=>({answer:'Summary.'});
-export const uploadCover=async()=>{},updateBook=async()=>{},getBook=async()=>({id:'fixture',title:'Fixture',format:'pdf',current_page:1}),bookFileSource=()=>({url:'fixture'}),updateProgress=async()=>{},updatePageCount=async()=>{},accountKey=k=>'test:'+k,getBookText=async()=>[],saveBookText=m.save,ocrPage=async()=>{},fetchBookBlob=async()=>new Blob(),createDocument=async()=>({id:'doc'}),getBookState=async()=>({data:m.state,version:0}),saveBookState=m.save;
+export const uploadCover=async()=>{},updateBook=async()=>{},getBook=async()=>({id:'fixture',title:'Fixture',format:'pdf',current_page:1}),bookFileSource=()=>({url:'fixture'}),updateProgress=async()=>{},updatePageCount=async()=>{},accountKey=k=>'test:'+k,getBookText=async()=>[],saveBookText=m.save,ocrPage=async()=>{},fetchBookBlob=async()=>new Blob(),createDocument=async()=>({id:'doc'}),getBookState=async()=>m.stateGate||({data:m.state,version:0}),saveBookState=m.save;
 `;
 apiMock += 'export const coverBlob=async()=>"",listBooks=async()=>globalThis.readerMocks.books.map(b=>({...b})),getConfig=async()=>({maxUploadMB:64});';
 const apiSource=await fs.readFile(new URL('../src/api.js',import.meta.url),'utf8');
@@ -44,7 +44,7 @@ after(async()=>{try{await act(async()=>root.unmount());}finally{await fs.rm(file
 async function tick(){await act(async()=>{await new Promise(r=>setTimeout(r,15))});}
 function button(name){return [...document.querySelectorAll('button')].find(b=>b.textContent.trim()===name)}
 async function click(node){assert.ok(node,'Button exists');await act(async()=>node.dispatchEvent(new MouseEvent('click',{bubbles:true})));await tick();}
-async function select(){const span=document.querySelector('[data-testid="passage"]');const range=document.createRange();range.selectNodeContents(span);range.getClientRects=()=>[{left:20,top:200,right:260,bottom:220,width:240,height:20}];range.getBoundingClientRect=()=>({left:20,top:200,right:260,bottom:220,width:240,height:20});const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);await act(async()=>span.dispatchEvent(new MouseEvent('mouseup',{bubbles:true})));}
+async function select(){const span=document.querySelector('[data-testid="passage"]');const range=document.createRange();range.selectNodeContents(span);range.getClientRects=()=>[{left:20,top:200,right:260,bottom:220,width:240,height:20}];range.getBoundingClientRect=()=>({left:20,top:200,right:260,bottom:220,width:240,height:20});const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);await act(async()=>{document.dispatchEvent(new Event('pointerup',{bubbles:true}));span.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));});}
 test('selection bubbles send once, quick meaning stays inline, and outside clicks dismiss the sidebar',async()=>{
  await act(async()=>root.render(React.createElement(React.StrictMode,null,React.createElement(Reader))));await tick();await tick();
  await select();assert.ok(button('Quick meaning'));assert.ok(button('Explain'));
@@ -66,13 +66,35 @@ test('selection settling does not erase a pending or completed quick answer',asy
 });
 test('asking without a selection uses readable page text without manual indexing',async()=>{
  window.getSelection().removeAllRanges();await act(async()=>document.querySelector('.reading-canvas').dispatchEvent(new MouseEvent('mouseup',{bubbles:true})));
- await click(button('Ask AI'));await click(button('Explain'));assert.equal(calls.at(-1)[0].trim(),'Focus grows with practice.');assert.ok(calls.at(-1)[2].history.every(m=>m.text.trim()));assert.equal(calls.at(-1)[2].history.find(m=>m.text.startsWith('xxxx')).text.length,6000);
+ await click(button('Ask AI'));await click(button('Explain'));assert.equal(calls.at(-1)[0].trim(),'Focus grows with practice.');assert.ok(calls.at(-1)[2].history.every(m=>m.text.trim()));assert.equal(calls.at(-1)[2].history.find(m=>m.text.startsWith('xxxx')).text.length,2000);
  await act(async()=>window.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true})));assert.equal(document.querySelector('.ai-chat'),null);
 });
 test('dismissing a pending quick meaning prevents a late popup',async()=>{
  let resolve;pendingMeaning=new Promise(r=>resolve=r);await select();await click(button('Quick meaning'));
  await act(async()=>document.querySelector('.reader-top').dispatchEvent(new Event('pointerdown',{bubbles:true})));
  await act(async()=>resolve({answer:'Late result.'}));assert.equal(document.querySelector('.quick-meaning'),null);pendingMeaning=null;
+});
+test('drag selection waits for pointer release and keeps the exact selected substring',async()=>{
+ const span=document.querySelector('[data-testid="passage"]');
+ await act(async()=>span.dispatchEvent(new Event('pointerdown',{bubbles:true})));
+ const range=document.createRange();range.setStart(span.firstChild,6);range.setEnd(span.firstChild,11);
+ range.getClientRects=()=>[{left:70,top:200,right:120,bottom:220,width:50,height:20}];range.getBoundingClientRect=()=>({left:70,top:200,right:120,bottom:220,width:50,height:20});
+ window.getSelection().removeAllRanges();window.getSelection().addRange(range);
+ await act(async()=>{document.dispatchEvent(new Event('selectionchange'));await new Promise(r=>setTimeout(r,220));});
+ assert.equal(document.querySelector('.selection-popover'),null,'nothing intercepts an unfinished drag');
+ await act(async()=>{document.dispatchEvent(new Event('pointerup'));span.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));});
+ const popover=document.querySelector('.selection-popover');assert.equal(Number.parseFloat(popover.style.top),190,'bottom anchor is ten pixels above selected text');
+ await click(button('Quick meaning'));assert.equal(calls.at(-1)[0],'grows');
+});
+test('AI selection actions work before cloud notes finish loading and merge answers afterward',async()=>{
+ await act(async()=>root.render(null));await tick();localStorage.clear();
+ let resolve;const m=globalThis.readerMocks;m.stateGate=new Promise(r=>resolve=r);
+ await act(async()=>root.render(React.createElement(Reader,{key:'slow-notes'})));await tick();await tick();
+ await select();assert.equal(button('Explain').disabled,false);await click(button('Explain'));
+ assert.match(document.querySelector('.ai-chat').textContent,/A full explanation/);
+ await act(async()=>resolve({data:{...m.state,chat:[{role:'ai',text:'Older saved answer.'}]},version:5}));await tick();
+ assert.match(document.querySelector('.ai-chat').textContent,/Older saved answer/);
+ assert.match(document.querySelector('.ai-chat').textContent,/A full explanation/);delete m.stateGate;
 });
 test('automatic cover eligibility keeps existing covers and excludes EPUB/trash',()=>{
  assert.ok(needsPdfCover({format:'pdf',cover_kind:'placeholder'}));

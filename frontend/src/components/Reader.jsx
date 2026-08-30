@@ -9,6 +9,7 @@ import { escapeHtml } from '../sanitize.js';
 import useBookState from '../useBookState.js';
 import AIPanel from './AIPanel.jsx';
 import useReadingAssistant from '../useReadingAssistant.js';
+import { selectionPopoverStyle, selectWordAtPoint } from '../selection.js';
 import EpubView from './EpubView.jsx';
 import Dialog from './Dialog.jsx';
 import {prepareOfflineShell} from '../offlineShell.js';
@@ -24,6 +25,7 @@ function ReaderScreen({
     [params] = useSearchParams(),
     state = useBookState(id),
     scroll = useRef(null),
+    selectingPointer = useRef(false),
     root = useRef(null),
     textCache = useRef(new Map()),
     saving = useRef(false),
@@ -48,6 +50,7 @@ function ReaderScreen({
     [panel, setPanel] = useState(params.has('action') ? 'ai' : null),
     [outline, setOutline] = useState([]),
     [selection, setSelection] = useState(null),
+    [selecting, setSelecting] = useState(false),
     [search, setSearch] = useState(''),
     [matches, setMatches] = useState([]),
     [matchIndex, setMatchIndex] = useState(0),
@@ -96,16 +99,21 @@ function ReaderScreen({
     if (assistant.busy) return;
     assistant.clearQuick();
     setPanel(mode === 'meaning' ? null : 'ai');
-    assistant.send(mode === 'meaning' ? 'Give the meaning of this word or passage in one or two short sentences.' : 'Explain the entire selected word or passage in clear, simple language, with a helpful example when appropriate.', { mode });
+    assistant.send(mode === 'meaning' ? 'Give the meaning of this word or passage in one or two short sentences.' : 'Explain the entire selected word or passage in clear, simple language, with a helpful example when appropriate.', { mode, source: selection ? {text:selection.text,page:selection.page} : undefined });
   }
   useEffect(() => {
     function outside(event) {
-      if (event.target.closest?.('.ai-chat,.selection-toolbar,.quick-meaning,[data-ai-trigger]')) return;
+      if (event.target.closest?.('.ai-chat,.selection-popover,[data-ai-trigger]')) return;
+      if (event.target.closest?.('.reading-canvas')) { selectingPointer.current = true; setSelecting(true); }
+      setSelection(null);
       setPanel(current => current === 'ai' ? null : current);
       assistant.clearQuick();
     }
+    const finish = () => { selectingPointer.current = false; setSelecting(false); };
     document.addEventListener('pointerdown', outside);
-    return () => document.removeEventListener('pointerdown', outside);
+    document.addEventListener('pointerup', finish);
+    document.addEventListener('pointercancel', finish);
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('pointerup', finish); document.removeEventListener('pointercancel', finish); };
   }, []);
   useEffect(() => {
     let active = true;
@@ -268,6 +276,7 @@ function ReaderScreen({
     if (mode === 'scroll' && scroll.current && !isEpub) scroll.current.scrollTop = offsets[next - 1] || 0;
   }
   function handleScroll() {
+    setSelection(null); assistant.clearQuick();
     if (mode !== 'scroll' || !pages || isEpub) return;
     const top = scroll.current.scrollTop + 30;
     let lo = 0,
@@ -368,6 +377,7 @@ function ReaderScreen({
     return html + escapeHtml(str.slice(from));
   }, [search]);
   function capture() {
+    if (selectingPointer.current) return;
     const sel = window.getSelection();
     if (!sel?.rangeCount || !sel.toString().trim()) {
       // Touch browsers may collapse the native range when a bubble is pressed.
@@ -399,7 +409,7 @@ function ReaderScreen({
     // Re-capturing the same selection must not discard an in-flight answer.
     if (selectedText !== selection?.text || selectedPage !== selection?.page) assistant.clearQuick();
     setSelection({
-      anchor: { x: Math.max(155, Math.min(window.innerWidth - 155, box.left + box.width / 2)), y: Math.max(65, Math.min(window.innerHeight - 200, box.top - 56)) },
+      viewport: {left:box.left,top:box.top,width:box.width,bottom:box.bottom},
       text: selectedText,
       page: selectedPage,
       rects
@@ -414,6 +424,9 @@ function ReaderScreen({
     document.addEventListener('selectionchange', changed);
     return () => { clearTimeout(timer.current); document.removeEventListener('selectionchange', changed); };
   });
+  function selectWord(event) {
+    if (selectWordAtPoint(document, event.clientX, event.clientY, scroll.current)) { event.preventDefault(); capture(); }
+  }
   function highlight(color) {
     if (!selection) return;
     state.update('highlights', prev => [...prev, {
@@ -492,7 +505,7 @@ function ReaderScreen({
   useEffect(() => {
     const handler = e => {
       if (e.key === 'Escape') { setPanel(null); setSelection(null); assistant.clearQuick(); return; }
-      if (e.target.closest('input,textarea,select,[contenteditable="true"]') || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.target.closest('input,textarea,select,[contenteditable="true"]') || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       if (e.key === 'ArrowRight' || e.key === 'PageDown') {
         e.preventDefault();
         jump(page + 1);
@@ -526,13 +539,13 @@ function ReaderScreen({
             const doc = await createDocument(`${book.title} — Notes`, `<h1>${escapeHtml(book.title)}</h1><p>${escapeHtml(state.data.notes || '').replace(/\n/g, '<br>')}</p>`);
             nav(`/writer?doc=${doc.id}`);
           })}>Open notes in Writer</button><h3>Highlights</h3>{state.data.highlights.map(h => <article className="highlight-note" key={h.id}><button onClick={() => jump(h.page)}>Page {h.page}</button><p>{h.text}</p><button onClick={() => state.update('highlights', prev => prev.filter(x => x.id !== h.id))}>Remove</button></article>)}</>}</aside>}
- <main className="reading-canvas" ref={scroll} onScroll={handleScroll} onMouseUp={capture} onKeyUp={capture} onTouchEnd={() => setTimeout(capture, 100)}>{isEpub ? <EpubView book={book} page={page} onPages={setPages} onOutline={setOutline} fontSize={fontSize} onText={setEpubText} /> : source && <Document file={source} onLoadSuccess={loaded} onLoadError={e => setError(`Could not open the PDF: ${e.message}`)} onItemClick={({
+ <main className="reading-canvas" ref={scroll} onScroll={handleScroll} onMouseUp={capture} onDoubleClick={selectWord} onKeyUp={capture}>{isEpub ? <EpubView book={book} page={page} onPages={setPages} onOutline={setOutline} fontSize={fontSize} onText={setEpubText} /> : source && <Document file={source} onLoadSuccess={loaded} onLoadError={e => setError(`Could not open the PDF: ${e.message}`)} onItemClick={({
           pageNumber
         }) => pageNumber && jump(pageNumber)} loading={<p role="status">Loading PDF pages…</p>}>{shown.map(n => <div className="pdf-page-wrap" data-page={n} key={n} style={{
             width: pageWidth,
             height: pageWidth * (ratios[n] || 1.414),
             marginBottom: 24
-          }}>{mode === 'single' || Math.abs(n - page) <= 2 ? <><Page pageNumber={n} width={pageWidth} customTextRenderer={renderText} renderTextLayer renderAnnotationLayer onLoadSuccess={p => {
+          }}>{mode === 'single' || Math.abs(n - page) <= 2 ? <><Page pageNumber={n} width={pageWidth} customTextRenderer={search.trim() ? renderText : undefined} renderTextLayer renderAnnotationLayer onLoadSuccess={p => {
                 const v = p.getViewport({
                     scale: 1
                   }),
@@ -551,8 +564,9 @@ function ReaderScreen({
           setFit(true);
           setZoom(1);
         }}>Fit width</button></>}<span className="sync-label">{message}</span></footer>{error && <div className="reader-notice notice error" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
- {selection && <div className="selection-toolbar" role="toolbar" aria-label="Selected text actions" style={{ left: selection.anchor?.x, top: selection.anchor?.y }} onMouseDown={e => e.preventDefault()}>{['yellow', 'green', 'pink', 'blue'].map(c => <button key={c} className={`color-dot ${c}`} aria-label={`Highlight ${c}`} onClick={() => highlight(c)} />)}<button className="selection-bubble" disabled={assistant.busy || !state.ready} onClick={() => selectionAI('explain')}>Explain</button><button className="selection-bubble" disabled={assistant.busy || !state.ready} onClick={() => selectionAI('meaning')}>Quick meaning</button><button onClick={() => speak()}>Read aloud</button><button onClick={() => setSelection(null)} aria-label="Dismiss selection">×</button></div>}
- {selection && assistant.quick && <section className="quick-meaning" role="dialog" aria-label="Quick meaning" style={{ left: selection.anchor?.x, top: (selection.anchor?.y || 65) + 96 }}><div className="panel-header"><strong>Quick meaning</strong><button aria-label="Close quick meaning" onClick={assistant.clearQuick}>×</button></div><p role="status" className="preserve-lines">{assistant.quick.loading ? 'Finding the meaning…' : assistant.quick.error || assistant.quick.text}</p>{assistant.quick.error && <button disabled={assistant.busy} onClick={() => selectionAI('meaning')}>Try again</button>}</section>}
+ {selection && !selecting && <div className="selection-popover" style={selectionPopoverStyle(selection.viewport, window.innerWidth)} onPointerDown={e => e.stopPropagation()} onMouseDown={e => e.preventDefault()}>
+ {assistant.quick && <section className="quick-meaning" role="dialog" aria-label="Quick meaning"><div className="panel-header"><strong>Quick meaning</strong><button aria-label="Close quick meaning" onClick={assistant.clearQuick}>×</button></div><small>{assistant.model}</small><p role="status" className="preserve-lines">{assistant.quick.loading ? `Finding the meaning… ${assistant.elapsed}s` : assistant.quick.error || assistant.quick.text}</p>{assistant.quick.loading && <button onClick={assistant.cancel}>Cancel request</button>}{assistant.quick.error && <button disabled={assistant.busy} onClick={() => selectionAI('meaning')}>Try again</button>}</section>}
+ <div className="selection-toolbar" role="toolbar" aria-label="Selected text actions"><div className="selection-primary"><button className="selection-bubble" disabled={assistant.busy} onClick={() => selectionAI('explain')}>Explain</button><button className="selection-bubble" disabled={assistant.busy} onClick={() => selectionAI('meaning')}>Quick meaning</button><button onClick={() => {setSelection(null);assistant.clearQuick();}} aria-label="Dismiss selection">×</button></div><div className="selection-secondary">{['yellow', 'green', 'pink', 'blue'].map(c => <button key={c} className={`color-dot ${c}`} aria-label={`Highlight ${c}`} onClick={() => highlight(c)} />)}<button onClick={() => speak()}>Read aloud</button></div></div></div>}
  {options && <Dialog title="Reading tools" onClose={() => setOptions(false)}><div className="form-grid">{!isEpub ? <label>Page layout<select value={mode} onChange={e => setMode(e.target.value)}><option value="scroll">Continuous scroll</option><option value="single">Single page</option></select></label> : <label>Text size<input type="range" min="14" max="36" value={fontSize} onChange={e => setFontSize(Number(e.target.value))} /></label>}<label>Speech voice<select value={voice} onChange={e => setVoice(e.target.value)}><option value="">System default</option>{voices.map(v => <option key={v.voiceURI} value={v.voiceURI}>{v.name} ({v.lang})</option>)}</select></label><label>Speech speed<select value={rate} onChange={e => setRate(Number(e.target.value))}>{[.75, 1, 1.25, 1.5, 2].map(r => <option key={r}>{r}</option>)}</select></label><label><input type="checkbox" checked={continuous} onChange={e => setContinuous(e.target.checked)} /> Continue to next PDF page</label></div><div className="action-row"><button onClick={() => speak()}>Read page aloud</button><button disabled={!speaking} onClick={() => {
           paused ? window.speechSynthesis.resume() : window.speechSynthesis.pause();
           setPaused(!paused);

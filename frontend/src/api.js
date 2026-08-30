@@ -45,6 +45,7 @@ export async function apiFetch(path, options = {}) {
       signal: options.signal || AbortSignal.timeout(options.timeout || 120000)
     });
   } catch (e) {
+    if (options.signal?.aborted) throw e;
     throw new ApiError(e.name === 'TimeoutError' ? 'Request timed out. Your local draft is retained.' : 'You are offline or the server is unavailable.', 0);
   }
   if (!res.ok) {
@@ -118,17 +119,13 @@ export async function fetchBookBlob(id) {
   if (!res.ok) throw new ApiError('Could not download this book.', res.status);
   return res.blob();
 }
-export const queryAI = (selectedText, question, extra = {}) => apiFetch('/api/ai/query', json('POST', {
-  selectedText,
-  question,
-  ...extra
-}));
-export const summarizeBook = (bookId, range = {}) => apiFetch('/api/ai/summary', {
+export const queryAI = (selectedText, question, extra = {}, options = {}) => apiFetch('/api/ai/query', {...json('POST', {selectedText, question, ...extra}), ...options});
+export const summarizeBook = (bookId, range = {}, options = {}) => apiFetch('/api/ai/summary', {
   ...json('POST', {
     bookId,
     ...range
   }),
-  timeout: 600000
+  timeout: 600000, ...options
 });
 export const ocrPage = (bookId, image) => apiFetch('/api/ai/ocr', json('POST', {
   bookId,
