@@ -1,143 +1,65 @@
 # The Reading Room
 
-A personal PDF reader: upload books, read them with a smooth virtualized
-viewer (only nearby pages render, unlike Brave's built-in viewer), your
-page position is saved automatically, and you can select any passage and
-ask an AI to summarize it or answer a question about it.
+A private PDF/EPUB library and writing space. React + Vite frontend; Express backend with local SQLite/files or Turso + Cloudflare R2. Node 24 LTS recommended (minimum 22.13).
 
-Same codebase runs **locally only** or **deployed** — nothing to rewrite,
-just a couple of settings change. See the bottom of this file for the
-tradeoffs.
+## What changed in version 2
 
----
+- **Covers:** new PDF uploads use a page from the actual PDF. Fill missing PDF covers in an existing library, select a different page, upload an image, or choose a published cover using title/author/ISBN. Optional title-inspired Gemini art is explicitly labeled as generated. No automatic random image requests remain.
+- **Library:** responsive grid/list, title/author/ISBN search, collections, favorites, reading status, batch upload, duplicate detection, continue-reading, recoverable trash, and expiring/revocable metadata-only share links.
+- **Reader:** virtual PDF pages, fit width, mixed page sizing, literal text search, outline, thumbnails, bookmarks, positioned highlights, cloud notes, Markdown export, notes-to-Writer, speech controls, basic EPUB reflow, and offline downloads.
+- **Study:** page-cited AI chat history, page-range/book summaries, explicit indexing/OCR, editable flashcards, scheduled reviews, measured reading time, and daily/annual goals.
+- **Writer:** debounced saves including empty documents, local recovery, revision conflict protection, save-as-copy, version history, safe find/replace, reviewed AI suggestions, DOCX import/export and print.
+- **Backend:** ownership checks before writes, revocable sessions, strong secret requirement, invite-based registration option, file validation, disk-spooled uploads, upload limits, quotas, ranged PDF responses, private storage and safe error responses.
+- **Operations:** automated checks, dependency updates, a local backup tool, and a migration checklist.
 
-## 1. Software you need to install (one-time)
+See [implementation and verification details](docs/VERIFICATION.md) and [migration instructions](docs/MIGRATION.md) before replacing a running installation.
 
-| Tool | Why | Get it |
-|---|---|---|
-| **Node.js** (v20 or later) | Runs both the backend and frontend | [nodejs.org](https://nodejs.org) — installer for macOS |
-| **Git** | To keep this in version control (and required for deploying) | Usually already on macOS; check with `git --version` |
-| **VS Code** (or any editor) | Editing the code | [code.visualstudio.com](https://code.visualstudio.com) |
-| **A free Gemini API key** | Powers the "Ask AI" feature | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) — sign in with any Google account, click "Create API key". No credit card needed. |
+## Local setup
 
-Check Node installed correctly:
-```bash
-node -v   # should print v20.x or higher
-npm -v
-```
+Use separate local test data first. **Do not copy a production `.env` into a test environment.**
 
----
+1. Install dependencies: `npm ci --prefix backend` and `npm ci --prefix frontend`.
+2. Copy `backend/.env.example` to `backend/.env`.
+3. Generate a random JWT secret using the command in the example file and enter it into `JWT_SECRET`. Keep it private. The API intentionally refuses to start without it.
+4. From `backend`, run `npm run dev`. The example config creates `backend/data/library.db` and stores objects in `backend/data/objects`.
+5. From `frontend`, run `npm run dev`. Open `http://localhost:5173` and register a local test account with a password of at least 12 characters.
+6. Gemini is optional. Add `GEMINI_API_KEY` only when you want to test AI calls. Check model availability and billing in your provider account.
 
-## 2. Project structure
+`VITE_API_URL` can remain blank for local development; Vite proxies `/api` to port 3001. For separate frontend/API hosting, build with the real HTTPS API origin and add the frontend origin to the backend allowlist. This app is configured for hosting at `/`, not a subdirectory.
 
-```
-pdf-reader/
-├── backend/     ← Express API: file storage, progress, AI proxy
-└── frontend/    ← React app: library grid + PDF reader
-```
+## Choosing authentic covers
 
----
+1. New PDFs automatically extract the first page. In **Details & cover**, select a different page when the cover is elsewhere.
+2. Use **Fill missing PDF covers** to update older books. It skips existing covers, processes sequentially, and can stop after the current book.
+3. For the publisher's artwork, fill the correct **title, author and preferably ISBN**, then choose **Find published covers**. Review the edition before selecting a result. A title alone can match several different editions.
+4. Upload an image when the book is unavailable in public catalogs.
+5. Optional **Create original AI artwork** generates a new design inspired by the title and supplied subject. It cannot guarantee the authentic publisher cover. Exact title/author text is added by the app after artwork generation.
 
-## 3. Run it locally first
+Extracted/uploaded/generated images are saved privately in the configured object store. Published cover URLs are stored as provider references and displayed directly. The lookup sends bibliographic details to Open Library and optionally Google Books; it does not send the PDF. Cover sources: [Open Library API](https://openlibrary.org/dev/docs/api/covers), [Google Books API](https://developers.google.com/books/docs/v1/using). Generated-art configuration: [Gemini image generation](https://ai.google.dev/gemini-api/docs/image-generation).
 
-Open **two terminal tabs** — one for the backend, one for the frontend.
+## AI and privacy
 
-**Terminal 1 — backend:**
-```bash
-cd backend
-npm install
-cp .env.example .env
-```
-Open `.env` and paste your Gemini API key into `GEMINI_API_KEY=`. Leave
-`APP_PASSWORD` blank for local use.
-```bash
-npm start
-```
-You should see `Reader backend running on http://localhost:3001`.
+AI runs only after a user action. Indexing stores extracted text in your account. Questions send selected text and relevant indexed pages to Gemini; summaries send the requested indexed pages. OCR sends the selected page image. Writing tools send selected text or the document text displayed in the review workflow. Generated art sends bibliographic information and the supplied description.
 
-**Terminal 2 — frontend:**
-```bash
-cd frontend
-npm install
-cp .env.example .env.local
-npm run dev
-```
-Open the URL it prints (usually `http://localhost:5173`). Upload a PDF and
-start reading.
+Text inside books is treated as source material, not instructions to the assistant. Page citations are model output and must be checked. Retrieval currently uses keyword matching, not a vector database. Summaries cover indexed text only (up to 400,000 characters per request); use page ranges for longer books. No API keys are embedded in frontend code. Do not index or send sensitive documents to a provider unless you accept that provider's terms.
 
-That's it — this is a fully working local app. Your PDFs live in
-`backend/uploads/`, your progress lives in `backend/library.db`.
+## Offline and recovery
 
----
+Explicitly download books using **Offline** or reader settings. The production service worker caches the application shell and lazy chunks; private API responses are never put in its cache. Offline books use account-scoped IndexedDB. Notes, pending positions and writing recovery drafts remain in account-scoped device storage.
 
-## 4. If you decide to host it instead
+Offline reading requires an already signed-in tab/session. A new session needs the server to sign in; it is not a separate offline authentication system. Browser storage can be cleared or evicted and is not an encrypted vault. Writer supports recovery of an open draft, but does not support fully offline creation of new cloud documents. Preferences can remove book downloads without discarding writing/notes recovery drafts. On a shared device, sign out and clear site data after exporting any unsynced work.
 
-The exact same code deploys with **three configuration changes**, no code
-rewrites:
+## Check and build
 
-1. **Backend → Azure VM** (use your GitHub Student Pack credit)
-   - Create a small Ubuntu VM (B1s/B2s tier is plenty)
-   - `git clone` your repo onto it, `cd backend`, `npm install`
-   - Set real values in `.env`: crucially, set `APP_PASSWORD` to something
-     only you know (this app has no user accounts — a shared password is
-     the whole auth model), and set `ALLOWED_ORIGINS` to your Vercel URL
-   - Run it persistently with [pm2](https://pm2.keymetrics.io/):
-     `npm install -g pm2 && pm2 start server.js --name reader && pm2 save`
-   - Put nginx in front for HTTPS via Certbot, or use your free Namecheap
-     SSL cert, and point your free `.me`/`.tech` domain at the VM
+- `npm test --prefix backend`
+- `npm test --prefix frontend`
+- `npm run build --prefix frontend`
+- `npm audit --prefix backend` and `npm audit --prefix frontend`
 
-2. **Frontend → Vercel**
-   - Push `frontend/` to GitHub, import it in Vercel
-   - Set the environment variable `VITE_API_URL` to your backend's public
-     URL (e.g. `https://api.yourdomain.me`)
-   - Deploy — Vercel handles the rest
+Production frontend files are emitted in `frontend/dist`. Cloud deployment, provider billing and actual cloud-book migration are separate from the local implementation checks. Nothing is deployed by these commands.
 
-3. **Update CORS**
-   - Make sure `ALLOWED_ORIGINS` in the backend `.env` includes your real
-     Vercel domain (comma-separated if you need more than one)
+## Backups
 
-Once `APP_PASSWORD` is set, the app automatically shows a login screen —
-no extra code needed, it's already built in.
+For local storage, stop the API, then from `backend` run `npm run backup:local -- /absolute/new-backup-folder`. The folder must not already exist. It contains a database snapshot and object files; protect it as private data. Restore into a separate environment first and verify books, notes and document versions.
 
-Want the detailed step-by-step for the Azure VM (firewall rules, nginx
-config, Certbot commands)? Just ask and I'll walk through it.
-
----
-
-## 5. Local-only vs. hosted — pros and cons
-
-### Running it only on your Mac
-**Pros**
-- Completely free, forever — no credits to track or run out
-- Fastest possible experience — zero network latency
-- Total privacy — your books and reading data never leave your laptop
-- Nothing to secure — it's not reachable from the internet, so no
-  password/auth system needed
-- Simplest to maintain — no server, domain, or certificate to manage
-
-**Cons**
-- Only usable on that one Mac — no reading from your phone or another
-  computer
-- You have to manually start both servers each time you want to read
-  (or set up a background launch agent)
-- No off-machine backup by default — if the laptop's drive fails, your
-  library and progress go with it (mitigate with Time Machine/iCloud)
-
-### Deployed (Azure VM + Vercel)
-**Pros**
-- Read from anywhere — phone, another computer, a friend's browser
-- Always on — no need to remember to start anything
-- Feels like a real product, with your own domain and HTTPS
-- Free at this scale thanks to your Student Pack credit
-
-**Cons**
-- More moving parts — VM, DNS, HTTPS, deployments to keep working
-- You're responsible for securing it (the built-in password gate covers
-  the basics, but it's still a public URL)
-- Slight network latency vs. local
-- Credit isn't infinite — worth glancing at usage occasionally, though a
-  personal-scale app will sip it slowly
-
-**A reasonable middle ground:** run it locally for a week or two first —
-confirm you like the reading experience and the AI panel is useful —
-then deploy once you're sure it's worth having on your phone too.
+For Turso/R2, back up both services as described in [MIGRATION.md](docs/MIGRATION.md). The in-app notes/metadata export is useful for portability, but is not a complete backup of PDFs, DOCX originals or versioned files.

@@ -1,211 +1,247 @@
-const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
-const defaultApiUrl = import.meta.env.DEV
-  ? ""
-  : "https://book-reader-project.onrender.com";
-// Accept either the backend origin or an origin that already includes /api.
-const API_URL = (configuredApiUrl || defaultApiUrl)
-  .replace(/\/+$/, "")
-  .replace(/\/api$/i, "");
-const AUTH_TOKEN_KEY = "reader_auth_token";
-
+const API_URL = (import.meta.env.VITE_API_URL?.trim() || '').replace(/\/+$/, '').replace(/\/api$/i, '');
 export function getAuthToken() {
-  return localStorage.getItem(AUTH_TOKEN_KEY) || "";
+  return sessionStorage.getItem('reader_auth_token') || '';
 }
 export function setAuthToken(token) {
-  localStorage.setItem(AUTH_TOKEN_KEY, token);
+  sessionStorage.setItem('reader_auth_token', token);
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    sessionStorage.setItem('reader_user_id', payload.id);
+  } catch {}
+  localStorage.removeItem('reader_auth_token');
+}
+export function getUserId() {
+  return sessionStorage.getItem('reader_user_id') || 'signed-out';
+}
+export function accountKey(key) {
+  return `rr:${getUserId()}:${key}`;
 }
 export function clearAuthToken() {
-  localStorage.removeItem(AUTH_TOKEN_KEY);
+  sessionStorage.removeItem('reader_auth_token');
+  sessionStorage.removeItem('reader_user_id');
+  localStorage.removeItem('reader_auth_token');
 }
-
-function authHeaders() {
+export function authHeaders() {
   const token = getAuthToken();
-  return token ? { "Authorization": `Bearer ${token}` } : {};
+  return token ? {
+    Authorization: `Bearer ${token}`
+  } : {};
 }
-
-async function apiFetch(path, options = {}) {
-  const res = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: { ...authHeaders(), ...(options.headers || {}) },
-  });
-  if (res.status === 401) {
-    // AuthGate handles displaying the login screen
-    throw new Error("UNAUTHORIZED");
+export class ApiError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+  }
+}
+export async function apiFetch(path, options = {}) {
+  let res;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers: {
+        ...authHeaders(),
+        ...(options.headers || {})
+      },
+      signal: options.signal || AbortSignal.timeout(options.timeout || 120000)
+    });
+  } catch (e) {
+    throw new ApiError(e.name === 'TimeoutError' ? 'Request timed out. Your local draft is retained.' : 'You are offline or the server is unavailable.', 0);
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Request failed (${res.status})`);
+    if (res.status === 401 && !path.startsWith('/api/auth/')) window.dispatchEvent(new Event('reader_session_expired'));
+    throw new ApiError(body.error || `Request failed (${res.status})`, res.status);
   }
   return res.status === 204 ? null : res.json();
 }
-
-export function loginUser(username, password) {
-  return apiFetch("/api/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
+const json = (method, body) => ({
+  method,
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify(body)
+});
+export const loginUser = (username, password) => apiFetch('/api/auth/login', json('POST', {
+  username,
+  password
+}));
+export const registerUser = (username, password, inviteCode) => apiFetch('/api/auth/register', json('POST', {
+  username,
+  password,
+  inviteCode
+}));
+export async function logoutUser() {
+  try {
+    await apiFetch('/api/logout', {
+      method: 'POST'
+    });
+  } finally {
+    clearAuthToken();
+    window.location.assign('/');
+  }
+}
+export async function listBooks(trash = false) {
+  const all = [];
+  for (let offset = 0;; offset += 500) {
+    const rows = await apiFetch(`/api/books?trash=${trash ? 1 : 0}&limit=500&offset=${offset}`);
+    all.push(...rows);
+    if (rows.length < 500) return all;
+  }
+}
+export const getBook = id => apiFetch(`/api/books/${id}`);
+export const updateBook = (id, data) => apiFetch(`/api/books/${id}`, json('PATCH', data));
+export const deleteBook = id => apiFetch(`/api/books/${id}`, {
+  method: 'DELETE'
+});
+export const restoreBook = id => apiFetch(`/api/books/${id}/restore`, {
+  method: 'POST'
+});
+export const purgeBook = id => apiFetch(`/api/books/${id}/permanent`, {
+  method: 'DELETE'
+});
+export const updateProgress = (id, currentPage, zoom) => apiFetch(`/api/books/${id}/progress`, json('PUT', {
+  currentPage,
+  zoom
+}));
+export const updatePageCount = (id, pageCount) => apiFetch(`/api/books/${id}/pages`, json('PATCH', {
+  pageCount
+}));
+export const bookFileSource = id => ({
+  url: `${API_URL}/api/books/${id}/file`,
+  httpHeaders: authHeaders()
+});
+export async function fetchBookBlob(id) {
+  const res = await fetch(`${API_URL}/api/books/${id}/file`, {
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(120000)
   });
+  if (!res.ok) throw new ApiError('Could not download this book.', res.status);
+  return res.blob();
 }
-
-export function registerUser(username, password) {
-  return apiFetch("/api/auth/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
+export const queryAI = (selectedText, question, extra = {}) => apiFetch('/api/ai/query', json('POST', {
+  selectedText,
+  question,
+  ...extra
+}));
+export const summarizeBook = (bookId, range = {}) => apiFetch('/api/ai/summary', {
+  ...json('POST', {
+    bookId,
+    ...range
+  }),
+  timeout: 600000
+});
+export const ocrPage = (bookId, image) => apiFetch('/api/ai/ocr', json('POST', {
+  bookId,
+  image
+}));
+export const generateCover = (bookId, description) => apiFetch('/api/ai/cover', json('POST', {
+  bookId,
+  description
+}));
+export const fixTextWithAI = text => apiFetch('/api/ai/fix', json('POST', {
+  text
+}));
+export const transformTextWithAI = (text, operation) => apiFetch('/api/ai/transform', json('POST', {
+  text,
+  operation
+}));
+export const getBookState = id => apiFetch(`/api/books/${id}/state`);
+export const saveBookState = (id, data, version) => apiFetch(`/api/books/${id}/state`, json('PUT', {
+  data,
+  version
+}));
+export const saveBookText = (id, pages) => apiFetch(`/api/books/${id}/text`, json('PUT', {
+  pages
+}));
+export const getBookText = id => apiFetch(`/api/books/${id}/text`);
+export const coverCandidates = id => apiFetch(`/api/books/${id}/cover-candidates`);
+export const setCoverReference = (id, url) => apiFetch(`/api/books/${id}/cover-reference`, json('PUT', {
+  url
+}));
+export async function coverBlob(book) {
+  if (book.cover_kind === 'published') return book.cover_ref;
+  if (!book.cover_ref) return '';
+  const res = await fetch(`${API_URL}/api/books/${book.id}/cover`, {
+    headers: authHeaders()
   });
+  if (!res.ok) throw new Error('Cover unavailable');
+  return URL.createObjectURL(await res.blob());
 }
-
-export function listBooks() {
-  return apiFetch("/api/books");
-}
-
-export function getBook(id) {
-  return apiFetch(`/api/books/${id}`);
-}
-
-export function deleteBook(id) {
-  return apiFetch(`/api/books/${id}`, { method: "DELETE" });
-}
-
-export function updateProgress(id, currentPage, zoom) {
-  return apiFetch(`/api/books/${id}/progress`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ currentPage, zoom }),
-  });
-}
-
-export function updatePageCount(id, pageCount) {
-  return apiFetch(`/api/books/${id}/pages`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pageCount }),
-  });
-}
-
-export function queryAI(selectedText, question) {
-  return apiFetch("/api/ai/query", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ selectedText, question }),
-  });
-}
-
-// Returns the pdf.js-compatible source object, including auth header,
-// so react-pdf's <Document> can fetch a protected file directly.
-export function bookFileSource(id) {
-  return {
-    url: `${API_URL}/api/books/${id}/file`,
-    httpHeaders: authHeaders(),
-  };
-}
-
-// Upload with progress callback via XHR (fetch doesn't expose upload progress)
-export function uploadBook(file, title, onProgress) {
+export const listDocuments = (trash = false) => apiFetch(`/api/documents?trash=${trash ? 1 : 0}`);
+export const createDocument = (title, html) => apiFetch('/api/documents/create', json('POST', {
+  title,
+  html
+}));
+export const getDocumentContent = id => apiFetch(`/api/documents/${id}/content`);
+export const saveDocument = (id, html, title, revision) => apiFetch(`/api/documents/${id}/save`, json('PUT', {
+  html,
+  title,
+  revision
+}));
+export const deleteDocument = id => apiFetch(`/api/documents/${id}`, {
+  method: 'DELETE'
+});
+export const restoreDocument = id => apiFetch(`/api/documents/${id}/restore`, {
+  method: 'POST'
+});
+export const purgeDocument = id => apiFetch(`/api/documents/${id}/permanent`, {
+  method: 'DELETE'
+});
+export const documentVersions = id => apiFetch(`/api/documents/${id}/versions`);
+export const getDocumentVersion = (id, version) => apiFetch(`/api/documents/${id}/versions/${version}`);
+export const documentContentUrl = id => `${API_URL}/api/documents/${id}/content`;
+export const getSettings = () => apiFetch('/api/account/settings');
+export const saveSettings = data => apiFetch('/api/account/settings', json('PUT', data));
+export const getStats = () => apiFetch('/api/account/stats');
+export const recordSession = data => apiFetch('/api/account/sessions', json('POST', data));
+export const exportAccount = () => apiFetch('/api/account/export');
+export const createShare = (bookIds, days) => apiFetch('/api/account/shares', json('POST', {
+  bookIds,
+  days
+}));
+export const listShares = () => apiFetch('/api/account/shares');
+export const revokeShare = id => apiFetch(`/api/account/shares/${id}`, {
+  method: 'DELETE'
+});
+export const sharedShelf = id => apiFetch(`/api/shared/${id}`);
+export const changePassword = (currentPassword, newPassword) => apiFetch('/api/password', json('POST', {
+  currentPassword,
+  newPassword
+}));
+export const getConfig = () => apiFetch('/api/config');
+function upload(path, file, title, onProgress, extra = {}) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${API_URL}/api/books/upload`);
+    xhr.open('POST', `${API_URL}${path}`);
+    xhr.timeout = 120000;
     const token = getAuthToken();
-    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = e => {
+      if (e.lengthComputable) onProgress?.(Math.round(e.loaded / e.total * 100));
     };
     xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(JSON.parse(xhr.responseText));
-      } else {
-        reject(new Error("Upload failed"));
+      let body;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        return reject(new Error('Invalid upload response'));
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body);else {
+        if (xhr.status === 401) window.dispatchEvent(new Event('reader_session_expired'));
+        reject(new ApiError(body.error || 'Upload failed', xhr.status));
       }
     };
-    xhr.onerror = () => reject(new Error("Upload failed"));
-
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("title", title);
-    xhr.send(formData);
+    xhr.onerror = () => reject(new Error('Network error. Please retry the upload.'));
+    xhr.ontimeout = () => reject(new Error('Upload timed out.'));
+    const form = new FormData();
+    form.append('file', file);
+    if (title) form.append('title', title);
+    for (const [k, v] of Object.entries(extra)) form.append(k, v);
+    xhr.send(form);
   });
 }
-
-export function fixTextWithAI(text) {
-  return apiFetch("/api/ai/fix", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
-}
-
-export function transformTextWithAI(text, operation) {
-  return apiFetch("/api/ai/transform", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, operation }),
-  });
-}
-
-// ── Document API ────────────────────────────────────────
-
-export function listDocuments() {
-  return apiFetch("/api/documents");
-}
-
-export function createDocument(title, html) {
-  return apiFetch("/api/documents/create", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, html }),
-  });
-}
-
-export function getDocumentContent(id) {
-  return apiFetch(`/api/documents/${id}/content`);
-}
-
-export function saveDocument(id, html, title) {
-  return apiFetch(`/api/documents/${id}/save`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ html, title }),
-  });
-}
-
-export function deleteDocument(id) {
-  return apiFetch(`/api/documents/${id}`, { method: "DELETE" });
-}
-
-
-
-export function uploadDocument(file, title, onProgress) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${API_URL}/api/documents/upload`);
-    const token = getAuthToken();
-    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(JSON.parse(xhr.responseText));
-      } else if (xhr.status === 401) {
-        reject(new Error("UNAUTHORIZED"));
-      } else {
-        let msg = `Upload failed (${xhr.status})`;
-        try { msg = JSON.parse(xhr.responseText).error || msg; } catch {}
-        reject(new Error(msg));
-      }
-    };
-    xhr.onerror = () => reject(new Error("Network error — check your connection"));
-
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("title", title || file.name.replace(/\.docx?$/i, ""));
-    xhr.send(formData);
-  });
-}
-
-// Returns the raw file URL for downloading a docx from R2 (for mammoth conversion)
-export function documentContentUrl(id) {
-  return `${API_URL}/api/documents/${id}/content`;
-}
+export const uploadBook = (file, title, onProgress) => upload('/api/books/upload', file, title, onProgress);
+export const uploadDocument = (file, title, onProgress) => upload('/api/documents/upload', file, title, onProgress);
+export const uploadCover = (id, file, kind = 'uploaded') => upload(`/api/books/${id}/cover`, file, '', null, {
+  kind
+});

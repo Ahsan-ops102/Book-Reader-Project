@@ -1,0 +1,17 @@
+{
+  "name": "The Reading Room",
+  "short_name": "Reading Room",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FBF8F3",
+  "theme_color": "#9b472b",
+  "description": "Your private reading and writing space",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

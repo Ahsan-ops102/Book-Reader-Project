@@ -1,237 +1,180 @@
-import express from "express";
-import multer from "multer";
-import crypto from "node:crypto";
-import db from "../db.js";
-import { uploadToR2, getFromR2, deleteFromR2 } from "../storage.js";
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
-  fileFilter: (_req, file, cb) => {
-    const allowed = [
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "application/msword",
-      "application/octet-stream", // Sometimes generic for drag/drop
-    ];
-    if (!allowed.includes(file.mimetype) && (!file.originalname || !file.originalname.match(/\.docx?$/i))) {
-      return cb(null, false); // Silently drop, req.file will be undefined
-    }
-    cb(null, true);
-  },
-});
-
+import express from 'express';
+import db from '../db.js';
+import { uploadToR2, readObject, deleteFromR2 } from '../storage.js';
+import { route, fail, text, integer, id, randomId } from '../security.js';
+import { upload, uploadGate, fileBuffer, validateZip, quota } from '../files.js';
 const router = express.Router();
-
-// List all documents, ordered by most recently edited
-router.get("/", async (req, res) => {
+async function owned(req, trash = false) {
+  const row = (await db.execute({
+    sql: `SELECT * FROM documents WHERE id=? AND user_id=? ${trash ? '' : 'AND deleted_at IS NULL'}`,
+    args: [id(req.params.id), req.user.id]
+  })).rows[0];
+  if (!row) fail(404, 'Document not found');
+  return row;
+}
+function content(value) {
+  if (typeof value !== 'string' || Buffer.byteLength(value) > 4 * 1024 * 1024) fail(400, 'Document must be text smaller than 4 MB.');
+  return value || '<p></p>';
+}
+function words(html) {
+  return html.replace(/<[^>]*>/g, ' ').trim().split(/\s+/).filter(Boolean).length;
+}
+router.get('/', route(async (req, res) => {
+  res.json((await db.execute({
+    sql: `SELECT id,title,word_count,revision,created_at,updated_at,deleted_at FROM documents WHERE user_id=? AND deleted_at IS ${req.query.trash === '1' ? 'NOT ' : ''}NULL ORDER BY updated_at DESC`,
+    args: [req.user.id]
+  })).rows);
+}));
+router.post('/create', route(async (req, res) => {
+  const title = text(req.body.title || 'Untitled Document', 'Title'),
+    html = content(req.body.html ?? '<p></p>'),
+    docId = randomId(),
+    filename = `docs/${req.user.id}/${docId}/${randomId()}.html`;
+  await quota(req.user.id, Buffer.byteLength(html));
+  await uploadToR2(filename, Buffer.from(html), 'text/html');
   try {
-    const result = await db.execute({
-      sql: `SELECT id, title, word_count, created_at, updated_at
-            FROM documents
-            WHERE user_id = ?
-            ORDER BY updated_at DESC`,
-      args: [req.user.id],
-    });
-    res.json(result.rows);
-  } catch (err) {
-    console.error("List documents failed:", err);
-    res.status(500).json({ error: "Failed to list documents" });
-  }
-});
-
-// Create a new blank document (saves HTML content to R2)
-router.post("/create", async (req, res) => {
-  const { title, html } = req.body;
-  const id = crypto.randomUUID();
-  const filename = `docs/${id}.html`;
-  const docTitle = title?.trim() || "Untitled Document";
-  const content = html || "<p></p>";
-
-  // Count words from plain-text extraction
-  const plainText = content.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-  const wordCount = plainText ? plainText.split(/\s+/).length : 0;
-
-  try {
-    await uploadToR2(filename, Buffer.from(content, "utf-8"), "text/html");
-
     await db.execute({
-      sql: "INSERT INTO documents (id, title, filename, word_count, user_id) VALUES (?, ?, ?, ?, ?)",
-      args: [id, docTitle, filename, wordCount, req.user.id],
+      sql: 'INSERT INTO documents(id,title,filename,word_count,user_id,size_bytes) VALUES(?,?,?,?,?,?)',
+      args: [docId, title, filename, words(html), req.user.id, Buffer.byteLength(html)]
     });
-
-    res.status(201).json({ id, title: docTitle });
-  } catch (err) {
-    console.error("Create document failed:", err);
-    res.status(500).json({ error: "Failed to create document" });
+  } catch (e) {
+    await deleteFromR2(filename).catch(() => {});
+    throw e;
   }
-});
-
-// Upload a .docx file — store the raw docx on R2, return metadata
-// The frontend will handle converting it to HTML via mammoth client-side
-router.post("/upload", upload.single("file"), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-
-  const id = crypto.randomUUID();
-  const filename = `docs/${id}.docx`;
-  const title = req.body.title?.trim() || req.file.originalname.replace(/\.docx?$/i, "");
-
+  res.status(201).json({
+    id: docId,
+    title,
+    revision: 0
+  });
+}));
+router.post('/upload', uploadGate, upload.single('file'), route(async (req, res) => {
+  const buffer = await fileBuffer(req);
+  await validateZip(buffer, 'docx');
+  await quota(req.user.id, buffer.length);
+  const title = text(req.body.title || req.file.originalname.replace(/\.docx$/i, ''), 'Title'),
+    docId = randomId(),
+    filename = `docs/${req.user.id}/${docId}/original.docx`;
+  await uploadToR2(filename, buffer, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
   try {
-    await uploadToR2(filename, req.file.buffer, req.file.mimetype);
-
     await db.execute({
-      sql: "INSERT INTO documents (id, title, filename, user_id) VALUES (?, ?, ?, ?)",
-      args: [id, title, filename, req.user.id],
+      sql: 'INSERT INTO documents(id,title,filename,original_filename,user_id,size_bytes) VALUES(?,?,?,?,?,?)',
+      args: [docId, title, filename, filename, req.user.id, buffer.length]
     });
-
-    res.status(201).json({ id, title });
-  } catch (err) {
-    console.error("Upload document failed:", err);
-    res.status(500).json({ error: "Upload failed" });
+  } catch (e) {
+    await deleteFromR2(filename).catch(() => {});
+    throw e;
   }
-});
-
-// Get one document's metadata
-router.get("/:id", async (req, res) => {
+  res.status(201).json({
+    id: docId,
+    title,
+    revision: 0
+  });
+}));
+router.get('/:id/content', route(async (req, res) => {
+  const doc = await owned(req);
+  const buffer = await readObject(doc.filename);
+  res.json({
+    html: doc.filename.endsWith('.html') ? buffer.toString('utf8') : undefined,
+    base64: doc.filename.endsWith('.html') ? undefined : buffer.toString('base64'),
+    format: doc.filename.endsWith('.html') ? 'html' : 'docx',
+    revision: doc.revision,
+    title: doc.title
+  });
+}));
+router.get('/:id/versions', route(async (req, res) => {
+  await owned(req);
+  res.json((await db.execute({
+    sql: 'SELECT id,title,word_count,revision,created_at FROM document_versions WHERE document_id=? ORDER BY revision DESC',
+    args: [req.params.id]
+  })).rows);
+}));
+router.get('/:id/versions/:version', route(async (req, res) => {
+  await owned(req);
+  const v = (await db.execute({
+    sql: 'SELECT * FROM document_versions WHERE id=? AND document_id=?',
+    args: [id(req.params.version), req.params.id]
+  })).rows[0];
+  if (!v) fail(404, 'Version not found');
+  const b = await readObject(v.filename);
+  res.json({
+    html: v.filename.endsWith('.html') ? b.toString('utf8') : undefined,
+    base64: v.filename.endsWith('.html') ? undefined : b.toString('base64'),
+    format: v.filename.endsWith('.html') ? 'html' : 'docx',
+    title: v.title
+  });
+}));
+router.put('/:id/save', route(async (req, res) => {
+  const doc = await owned(req);
+  const expected = integer(req.body.revision, 'Revision'),
+    html = content(req.body.html),
+    title = text(req.body.title ?? doc.title, 'Title');
+  if (expected !== doc.revision) fail(409, 'This document changed on another device. Reload or keep your draft as a new document.');
+  const filename = `docs/${req.user.id}/${doc.id}/${randomId()}.html`,
+    size = Buffer.byteLength(html);
+  await quota(req.user.id, size);
+  await uploadToR2(filename, Buffer.from(html), 'text/html');
+  const tx = await db.transaction('write');
   try {
-    const result = await db.execute({
-      sql: "SELECT id, title, word_count, created_at, updated_at FROM documents WHERE id = ? AND user_id = ?",
-      args: [req.params.id, req.user.id],
+    const result = await tx.execute({
+      sql: "UPDATE documents SET filename=?,title=?,word_count=?,revision=revision+1,size_bytes=size_bytes+?,updated_at=datetime('now') WHERE id=? AND user_id=? AND revision=? AND deleted_at IS NULL",
+      args: [filename, title, words(html), size, doc.id, req.user.id, expected]
     });
-    if (result.rows.length === 0) return res.status(404).json({ error: "Document not found" });
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error("Get document failed:", err);
-    res.status(500).json({ error: "Failed to get document" });
+    if (result.rowsAffected !== 1) fail(409, 'This document changed while saving. Your draft has been retained.');
+    await tx.execute({
+      sql: 'INSERT INTO document_versions(id,document_id,filename,title,word_count,revision) VALUES(?,?,?,?,?,?)',
+      args: [randomId(), doc.id, doc.filename, doc.title, doc.word_count || 0, expected]
+    });
+    await tx.commit();
+  } catch (e) {
+    await tx.rollback();
+    await deleteFromR2(filename).catch(() => {});
+    throw e;
+  } finally {
+    tx.close();
   }
-});
-
-// Fetch the document content from R2 (returns HTML or streams the raw .docx)
-router.get("/:id/content", async (req, res) => {
-  try {
-    const result = await db.execute({
-      sql: "SELECT filename FROM documents WHERE id = ? AND user_id = ?",
-      args: [req.params.id, req.user.id],
-    });
-    if (result.rows.length === 0) return res.status(404).json({ error: "Document not found" });
-
-    const filename = result.rows[0].filename;
-    const r2Response = await getFromR2(filename);
-
-    if (filename.endsWith(".html")) {
-      // HTML content — read and return as JSON
-      const chunks = [];
-      const stream = r2Response.Body.transformToWebStream();
-      const reader = stream.getReader();
-      let done = false;
-      while (!done) {
-        const { value, done: d } = await reader.read();
-        if (value) chunks.push(value);
-        done = d;
-      }
-      const html = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf-8");
-      res.json({ html, format: "html" });
-    } else {
-      // Raw .docx — stream the binary to the client for mammoth conversion
-      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
-      r2Response.Body.transformToWebStream().pipeTo(
-        new WritableStream({
-          write(chunk) { res.write(chunk); },
-          close() { res.end(); },
-          abort(err) { console.error("Stream error:", err); res.end(); },
-        })
-      );
-    }
-  } catch (err) {
-    console.error("Get content failed:", err);
-    res.status(500).json({ error: "Failed to get document content" });
-  }
-});
-
-// Save/update document content — overwrites the R2 file with new HTML
-router.put("/:id/save", async (req, res) => {
-  const { html, title } = req.body;
-  if (!html) return res.status(400).json({ error: "No content provided" });
-
-  try {
-    const id = req.params.id;
-    const htmlFilename = `docs/${id}.html`;
-    const docxFilename = `docs/${id}.docx`;
-
-    // Optimistically delete the .docx file if it existed
-    await deleteFromR2(docxFilename).catch(() => {});
-
-    await uploadToR2(htmlFilename, Buffer.from(html, "utf-8"), "text/html");
-
-    // Count words
-    const plainText = html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-    const wordCount = plainText ? plainText.split(/\s+/).length : 0;
-
-    // Verify ownership
-    const check = await db.execute({
-      sql: "SELECT id FROM documents WHERE id = ? AND user_id = ?",
-      args: [id, req.user.id],
-    });
-    // If it doesn't exist yet, it's fine (UPSERT will create it). If it exists but belongs to someone else, we shouldn't let them overwrite it.
-    // Wait, the client only sends /save for existing documents.
-    if (check.rows.length === 0) {
-      // It might be a brand new doc in a weird state, let's just ensure we insert with user_id
-    }
-
-    if (title) {
-      await db.execute({
-        sql: `INSERT INTO documents (id, title, filename, word_count, user_id, updated_at)
-              VALUES (?, ?, ?, ?, ?, datetime('now'))
-              ON CONFLICT(id) DO UPDATE SET
-              title = excluded.title,
-              filename = excluded.filename,
-              word_count = excluded.word_count,
-              user_id = excluded.user_id,
-              updated_at = excluded.updated_at`,
-        args: [id, title, htmlFilename, wordCount, req.user.id],
-      });
-    } else {
-      await db.execute({
-        sql: `INSERT INTO documents (id, title, filename, word_count, user_id, updated_at)
-              VALUES (?, 'Untitled Document', ?, ?, ?, datetime('now'))
-              ON CONFLICT(id) DO UPDATE SET
-              filename = excluded.filename,
-              word_count = excluded.word_count,
-              user_id = excluded.user_id,
-              updated_at = excluded.updated_at`,
-        args: [id, htmlFilename, wordCount, req.user.id],
-      });
-    }
-
-    res.json({ ok: true, wordCount });
-  } catch (err) {
-    console.error("Save document failed:", err);
-    res.status(500).json({ error: "Failed to save document" });
-  }
-});
-
-// Delete a document (R2 file + DB row)
-router.delete("/:id", async (req, res) => {
-  try {
-    const result = await db.execute({
-      sql: "SELECT filename FROM documents WHERE id = ? AND user_id = ?",
-      args: [req.params.id, req.user.id],
-    });
-    if (result.rows.length === 0) return res.status(404).json({ error: "Document not found" });
-
-    await deleteFromR2(result.rows[0].filename).catch((err) =>
-      console.error("R2 delete warning:", err)
-    );
-
-    await db.execute({
-      sql: "DELETE FROM documents WHERE id = ? AND user_id = ?",
-      args: [req.params.id, req.user.id],
-    });
-
-    res.json({ ok: true });
-  } catch (err) {
-    console.error("Delete document failed:", err);
-    res.status(500).json({ error: "Failed to delete document" });
-  }
-});
-
+  res.json({
+    ok: true,
+    wordCount: words(html),
+    revision: expected + 1
+  });
+}));
+router.delete('/:id', route(async (req, res) => {
+  await owned(req);
+  await db.execute({
+    sql: "UPDATE documents SET deleted_at=datetime('now') WHERE id=? AND user_id=?",
+    args: [req.params.id, req.user.id]
+  });
+  res.json({
+    ok: true
+  });
+}));
+router.post('/:id/restore', route(async (req, res) => {
+  await owned(req, true);
+  await db.execute({
+    sql: 'UPDATE documents SET deleted_at=NULL WHERE id=? AND user_id=?',
+    args: [req.params.id, req.user.id]
+  });
+  res.json({
+    ok: true
+  });
+}));
+router.delete('/:id/permanent', route(async (req, res) => {
+  const doc = await owned(req, true);
+  if (!doc.deleted_at) fail(400, 'Move the document to trash first.');
+  const versions = (await db.execute({
+    sql: 'SELECT filename FROM document_versions WHERE document_id=?',
+    args: [doc.id]
+  })).rows;
+  for (const filename of new Set([doc.filename, doc.original_filename, ...versions.map(v => v.filename)].filter(Boolean))) await deleteFromR2(filename);
+  await db.batch([{
+    sql: 'DELETE FROM document_versions WHERE document_id=?',
+    args: [doc.id]
+  }, {
+    sql: 'DELETE FROM documents WHERE id=? AND user_id=?',
+    args: [doc.id, req.user.id]
+  }], 'write');
+  res.json({
+    ok: true
+  });
+}));
 export default router;
